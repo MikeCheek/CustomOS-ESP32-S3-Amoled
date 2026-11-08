@@ -324,11 +324,29 @@ void sim_scenarios() {
     sim_run(800);
     sim_save("assistant_long_word");
     g_sim.recording = false;
+    // Settings > Text size > Larger: the answer's lines spaced for the bigger letters
+    g_app_settings.text_size = 2;
+    shot(&assistant_screen, "assistant_listen", 900);
+    sim_tap(233, 233);
+    sim_run(200);
+    assistant_on_result(3, "What's the weather like?", "Sunny until four, then rain - take an umbrella if you go out tonight.",
+                        "", 0, "", false, false);
+    sim_run(800);
+    sim_save("assistant_large_text");
+    g_sim.recording = false;
+    g_app_settings.text_size = 0;
+    // the phone out of reach: what the watch does by itself
+    { bool was = g_sim.phone;
+      g_sim.phone = false;
+      shot(&assistant_screen, "assistant_offline", 900);
+      g_sim.phone = was;
+      sim_link("{\"t\":\"hi\"}");   // the app links up again
+      sim_run(300); }
     // a message by voice, waiting for its OK
     shot(&assistant_screen, "assistant_listen", 900);
     sim_tap(233, 233);
     sim_run(200);
-    assistant_on_result(3, "Tell Marco I'm 10 minutes late", "Send to Marco on WhatsApp: \"I'm 10 minutes late\"? Tap Send, or say yes.",
+    assistant_on_result(4, "Tell Marco I'm 10 minutes late", "Send to Marco on WhatsApp: \"I'm 10 minutes late\"? Tap Send, or say yes.",
                         "send", 0, "", false, false);
     sim_run(800);
     sim_save("assistant_send");

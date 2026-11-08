@@ -32,6 +32,10 @@ Built on Arduino + Arduino_GFX, no LVGL.
   - messages by voice ("tell Marco I'm late", "di' a Luca che arrivo tardi"), sent after an OK; voice replies
     touched up by the AI (shorter, friendlier, formal); more commands in Italian without the language model
   - Diagnostics: the battery cost of the speaker, microphone, GPS and Wi-Fi, next to the screen's
+  - routines ("good night": Do not disturb, the alarm, the recap); calendar events added and moved by voice; on
+    Sundays the recap adds the week's sleep, steps and workouts; only what matters buzzes; with the phone out of
+    reach the assistant offers the watch's own timers, stopwatch and alarms (and offline commands); larger text
+    spaced to fit
 - **In the app:** AI models > Speed > "Test the language model" checks the model in use; one that keeps answering
   garbled text is replaced by another installed model, and the app says so.
 - **New in the app, checked on a phone:** the voices speak again (sherpa-onnx 2 needs its text turned into phonemes

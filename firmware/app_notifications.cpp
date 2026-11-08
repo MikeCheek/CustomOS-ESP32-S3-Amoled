@@ -141,10 +141,12 @@ void notifications_mute_app(const char *app, bool on) {
 }
 uint32_t notifications_unread() { return s_unread; }
 
-static void toast_for(const NotifHistoryItem &it) {
+// quiet: the phone judged it not worth a buzz (promotions, busy group chats):
+// it goes into the list and Catch me up, without a toast or a vibration.
+static void toast_for(const NotifHistoryItem &it, bool quiet) {
     s_unread++;
     usage_count_notification();
-    if (dnd_active() || notifications_app_muted(it.source)) return;
+    if (quiet || dnd_active() || notifications_app_muted(it.source)) return;
     haptic(HAP_NOTIFY);
     char t[96];
     if (it.title[0]) snprintf(t, sizeof(t), "%s: %s", it.title, it.text);
@@ -161,7 +163,7 @@ static NotifHistoryItem &next_slot() {
 }
 
 void notifications_add(uint32_t id, const char *app, const char *title, const char *text, bool can_reply,
-                       uint32_t icon) {
+                       uint32_t icon, bool quiet) {
     if (!s_history) return;
     // An update of a notification we already have (chat with new message)
     // replaces it in place instead of filling the list with copies.
@@ -177,7 +179,7 @@ void notifications_add(uint32_t id, const char *app, const char *title, const ch
                 it.received_ms = millis();
                 if (icon) it.icon = icon;
                 s_revision++;
-                toast_for(it);
+                toast_for(it, quiet);
                 return;
             }
         }
@@ -194,7 +196,7 @@ void notifications_add(uint32_t id, const char *app, const char *title, const ch
     it.received_ms = millis();
     it.icon = icon;
     s_revision++;
-    toast_for(it);
+    toast_for(it, quiet);
 }
 
 // Rebuilds the ring without entry `idx` (0 = newest) - for the plain-text
@@ -271,7 +273,7 @@ void notifications_update() {
         it.received_ms = millis();
         it.icon = 0;
         s_revision++;
-        toast_for(it);
+        toast_for(it, false);
     }
 }
 
@@ -502,7 +504,7 @@ static void ago(uint32_t ms, char *out, size_t n) {
 // Returns the y after the last line.
 static int draw_wrapped(Arduino_GFX *g, const char *text, int y, int width_px, int size, uint16_t color, int max_lines) {
     (void)g;
-    int lh = 8 * size + 8;
+    int lh = ui_line_height(size, 8 * size + 8);
     const char *p = text;
     char line[120];
     int lines = 0;

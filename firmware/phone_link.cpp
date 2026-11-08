@@ -145,7 +145,7 @@ static void handle(const char *msg) {
     } else if (!strcmp(t, "ntf")) {
         s_active = true;
         notifications_add(doc["id"] | 0u, doc["ap"] | "Phone", doc["ti"] | "", doc["tx"] | "",
-                          (doc["rp"] | 0) != 0, doc["ic"] | 0u);
+                          (doc["rp"] | 0) != 0, doc["ic"] | 0u, (doc["q"] | 0) != 0);
     } else if (!strcmp(t, "sr")) {
         // Smart replies for one message: written by the phone's LLM.
         const char *items[NOTIF_SMART_MAX];
@@ -234,7 +234,10 @@ static void handle(const char *msg) {
     } else if (!strcmp(t, "brief")) {
         comp_set_brief(doc["v"] | "", doc["l"] | "", doc["x"] | "");
     } else if (!strcmp(t, "sent")) {
-        assistant_on_sent((doc["ok"] | 0) != 0, doc["to"] | "");
+        const char *m = doc["msg"] | "";
+        char legacy[48];
+        if (!m[0] && (doc["to"] | "")[0]) { snprintf(legacy, sizeof(legacy), "Sent to %s", (const char *)(doc["to"] | "")); m = legacy; }
+        assistant_on_sent((doc["ok"] | 0) != 0, m);
     } else if (!strcmp(t, "recap")) {
         comp_set_recap(doc["x"] | "");
         assistant_expect_speech();   // the phone says it right after
@@ -265,8 +268,11 @@ static void handle(const char *msg) {
     } else if (!strcmp(t, "ask")) {
         uint32_t n = doc["n"] | 0u;
         if (doc["st"].is<const char *>()) assistant_on_status(n, doc["st"]);
-        else assistant_on_result(n, doc["q"] | "", doc["a"] | "", doc["do"] | "", doc["s"] | 0, doc["err"] | "",
+        else {
+            assistant_set_action_label(doc["lbl"] | "Send");
+            assistant_on_result(n, doc["q"] | "", doc["a"] | "", doc["do"] | "", doc["s"] | 0, doc["err"] | "",
                                  (doc["sp"] | 0) != 0, (doc["fl"] | 0) != 0);
+        }
     } else if (!strcmp(t, "pf")) {
         // Photo faces: {"a":"list"} / {"a":"show","n":..} / {"a":"del","n":..} / {"a":"rot","m":0|1|2}
         const char *a = doc["a"] | "list";

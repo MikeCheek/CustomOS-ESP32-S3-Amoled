@@ -13,6 +13,7 @@ import '../services/whisper_service.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common.dart';
 import 'ai_profile_screen.dart';
+import 'routines_screen.dart';
 import 'wake_word_screen.dart';
 
 /// The on-device AI: one card per feature with its status; open it to
@@ -567,6 +568,12 @@ class _AiSettingsScreenState extends State<AiSettingsScreen> {
                 const SectionLabel('On the watch'),
                 RowGroup(
                   children: [
+                    NavRow(
+                      icon: Icons.playlist_play_rounded,
+                      title: 'Routines',
+                      subtitle: '"Good night": Do not disturb, the alarm, the recap - in one phrase',
+                      onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const RoutinesScreen())),
+                    ),
                     NavRow(
                       icon: Icons.record_voice_over_rounded,
                       title: 'Wake word & offline commands',

@@ -171,9 +171,23 @@ class PhoneBridge(private val app: Context, messenger: BinaryMessenger) {
                         } else {
                             val title = call.argument<String>("title") ?: ""
                             val begin = call.argument<Number>("begin")?.toLong() ?: 0L
+                            val minutes = call.argument<Number>("minutes")?.toLong() ?: 5L
+                            val alert = call.argument<Boolean>("alert") ?: true
                             Thread {
-                                val id = try { addReminder(title, begin) } catch (e: Exception) { -1L }
+                                val id = try { addReminder(title, begin, minutes, alert) } catch (e: Exception) { -1L }
                                 main.post { result.success(id) }
+                            }.start()
+                        }
+                    }
+                    "moveEvent" -> {
+                        if (app.checkSelfPermission(Manifest.permission.WRITE_CALENDAR) != PackageManager.PERMISSION_GRANTED) {
+                            result.error("permission", "WRITE_CALENDAR not granted", null)
+                        } else {
+                            val id = call.argument<Number>("id")?.toLong() ?: -1L
+                            val begin = call.argument<Number>("begin")?.toLong() ?: 0L
+                            Thread {
+                                val ok = try { moveEvent(id, begin) } catch (e: Exception) { false }
+                                main.post { result.success(ok) }
                             }.start()
                         }
                     }
@@ -602,7 +616,28 @@ class PhoneBridge(private val app: Context, messenger: BinaryMessenger) {
     /// writable calendar, for the voice assistant's reminders and alarms.
     /// The calendar observer then syncs it to the watch, which reminds on
     /// its own. Returns the event id, or -1.
-    private fun addReminder(title: String, begin: Long): Long {
+    // An event moved to [begin], keeping its length. Not a repeating one:
+    // moving the whole series by voice would be a surprise.
+    private fun moveEvent(id: Long, begin: Long): Boolean {
+        if (id < 0 || begin <= 0) return false
+        val uri = android.content.ContentUris.withAppendedId(CalendarContract.Events.CONTENT_URI, id)
+        var len = -1L
+        app.contentResolver.query(uri, arrayOf(CalendarContract.Events.DTSTART, CalendarContract.Events.DTEND,
+            CalendarContract.Events.RRULE), null, null, null)?.use { c ->
+            if (c.moveToFirst()) {
+                if (!c.getString(2).isNullOrEmpty()) return false
+                len = c.getLong(1) - c.getLong(0)
+            }
+        }
+        if (len < 0) return false
+        val v = ContentValues().apply {
+            put(CalendarContract.Events.DTSTART, begin)
+            put(CalendarContract.Events.DTEND, begin + len)
+        }
+        return app.contentResolver.update(uri, v, null, null) > 0
+    }
+
+    private fun addReminder(title: String, begin: Long, minutes: Long = 5L, alert: Boolean = true): Long {
         var calId = -1L
         app.contentResolver.query(
             CalendarContract.Calendars.CONTENT_URI,
@@ -622,15 +657,15 @@ class PhoneBridge(private val app: Context, messenger: BinaryMessenger) {
             put(CalendarContract.Events.CALENDAR_ID, calId)
             put(CalendarContract.Events.TITLE, title)
             put(CalendarContract.Events.DTSTART, begin)
-            put(CalendarContract.Events.DTEND, begin + 5 * 60_000L)
+            put(CalendarContract.Events.DTEND, begin + minutes * 60_000L)
             put(CalendarContract.Events.EVENT_TIMEZONE, java.util.TimeZone.getDefault().id)
-            put(CalendarContract.Events.HAS_ALARM, 1)
+            put(CalendarContract.Events.HAS_ALARM, if (alert) 1 else 0)
         }
         val uri = app.contentResolver.insert(CalendarContract.Events.CONTENT_URI, ev) ?: return -1
         val id = uri.lastPathSegment?.toLongOrNull() ?: return -1
         app.contentResolver.insert(CalendarContract.Reminders.CONTENT_URI, ContentValues().apply {
             put(CalendarContract.Reminders.EVENT_ID, id)
-            put(CalendarContract.Reminders.MINUTES, 0)
+            put(CalendarContract.Reminders.MINUTES, if (alert && minutes <= 5) 0 else 15)   // an event: 15 min before
             put(CalendarContract.Reminders.METHOD, CalendarContract.Reminders.METHOD_ALERT)
         })
         return id

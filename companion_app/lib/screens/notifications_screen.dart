@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:permission_handler/permission_handler.dart';
 import '../providers/ble_provider.dart';
 import '../providers/settings_provider.dart';
+import '../services/notif_priority.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common.dart';
 import '../widgets/platform_notice.dart';
@@ -25,6 +26,7 @@ class _AppItem {
 
 class _NotificationsScreenState extends ConsumerState<NotificationsScreen> with WidgetsBindingObserver {
   bool _hasAccess = false;
+  bool _smartBuzz = true; // notif_priority.dart
   bool _waitingForAccess = false;
 
   static const _apps = [
@@ -43,6 +45,9 @@ class _NotificationsScreenState extends ConsumerState<NotificationsScreen> with 
   @override
   void initState() {
     super.initState();
+    NotifPriority.enabled().then((v) {
+      if (mounted) setState(() => _smartBuzz = v);
+    });
     WidgetsBinding.instance.addObserver(this);
     _checkAccess();
   }
@@ -158,6 +163,19 @@ class _NotificationsScreenState extends ConsumerState<NotificationsScreen> with 
                 subtitle: 'Reply and dismiss from the watch',
                 value: s.forwardNotifications && _hasAccess,
                 onChanged: _setForward,
+              ),
+              ToggleRow(
+                icon: Icons.vibration_rounded,
+                color: AppColors.warning,
+                title: 'Buzz only for what matters',
+                subtitle:
+                    'People writing to you, codes, deliveries, payments buzz; promotions, busy groups and '
+                    'likes arrive quietly (in the list and Catch me up)',
+                value: _smartBuzz,
+                onChanged: (v) async {
+                  await NotifPriority.setEnabled(v);
+                  setState(() => _smartBuzz = v);
+                },
               ),
               ToggleRow(
                 icon: Icons.call_rounded,

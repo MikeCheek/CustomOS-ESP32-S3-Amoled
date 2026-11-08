@@ -29,8 +29,9 @@ struct NotifHistoryItem {
 };
 
 // From the phone link. Same id again updates that entry in place.
+// quiet: no toast, no buzz - the phone judged it not urgent ({"t":"ntf",...,"q":1}).
 void notifications_add(uint32_t id, const char *app, const char *title, const char *text, bool can_reply,
-                       uint32_t icon = 0);
+                       uint32_t icon = 0, bool quiet = false);
 // The phone dismissed it (or it was handled there).
 void notifications_remove(uint32_t id);
 

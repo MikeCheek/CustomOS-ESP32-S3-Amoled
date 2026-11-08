@@ -52,6 +52,12 @@ bool voice_wake_keeps_awake();        // listening with the screen off: no light
 // /srmodels/mn7_en, "wn:mn7_en/<file>" from the app): music, timers,
 // find my phone, do not disturb, opening apps. Setting voice_commands.
 bool voice_commands_installed();
+
+// The assistant with the phone out of reach: listen for one offline command
+// now (no wake word) - timers, do not disturb, the time, opening apps. False
+// when the commands aren't loaded (wake word off, or MultiNet not installed).
+bool voice_offline_command();
+bool voice_offline_listening();   // waiting for that command
 const char *voice_commands_status();  // one line for Settings
 
 // A "wn:<model>/<file>" Bluetooth transfer (name without the "wn:").

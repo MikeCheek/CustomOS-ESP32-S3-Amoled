@@ -9,7 +9,7 @@
 /// (test/assistant_intents_test.dart).
 library;
 
-enum IntentKind { timer, cancelTimer, reminder, music, weather, time, date, battery, agenda, findPhone, dnd, memos, message, none }
+enum IntentKind { timer, cancelTimer, reminder, music, weather, time, date, battery, agenda, findPhone, dnd, memos, message, event, moveEvent, none }
 
 class AssistantIntent {
   final IntentKind kind;
@@ -17,7 +17,7 @@ class AssistantIntent {
   final int? seconds;        // timer
   final DateTime? at;        // reminder / alarm
   final String? text;        // reminder title, memo question
-  final String? command;     // music: play pause next prev volUp volDown; message: who to
+  final String? command;     // music: play pause next prev volUp volDown; message: who to; moveEvent: the old "HH:MM", if said that way
   final bool? on;            // dnd
 
   const AssistantIntent(this.kind,
@@ -110,6 +110,51 @@ DateTime _next(DateTime now, int h, int m, String s, bool exact) {
 
 bool _has(String s, String pattern) => RegExp(pattern).hasMatch(s);
 
+const _weekdays = {
+  'monday': 1, 'tuesday': 2, 'wednesday': 3, 'thursday': 4, 'friday': 5, 'saturday': 6, 'sunday': 7,
+  'lunedì': 1, 'lunedi': 1, 'martedì': 2, 'martedi': 2, 'mercoledì': 3, 'mercoledi': 3, 'giovedì': 4, 'giovedi': 4,
+  'venerdì': 5, 'venerdi': 5, 'sabato': 6, 'domenica': 7,
+};
+
+/// [at] moved to the next [s]-named weekday ("friday", "venerdì"), at the same time; [at] without one.
+DateTime _onWeekday(DateTime at, String s, DateTime now) {
+  for (final e in _weekdays.entries) {
+    // not \b: "venerdì" ends in a letter \b doesn't count as one
+    if (!RegExp('(?<!\\p{L})${e.key}(?!\\p{L})', unicode: true).hasMatch(s)) continue;
+    var d = DateTime(now.year, now.month, now.day, at.hour, at.minute);
+    var add = (e.value - now.weekday) % 7;
+    if (add == 0 && !d.isAfter(now)) add = 7;
+    return d.add(Duration(days: add));
+  }
+  return at;
+}
+
+/// A title as it was said (capitals kept), without the time and day words.
+String _cleanTitle(String norm, String original) {
+  var t = norm
+      .replaceAll(
+        RegExp(
+          r"(?<!\p{L})(tomorrow|today|tonight|domani|oggi|stasera|this|next|questo|prossimo|"
+          r"monday|tuesday|wednesday|thursday|friday|saturday|sunday|lunedì|lunedi|martedì|martedi|mercoledì|"
+          r"mercoledi|giovedì|giovedi|venerdì|venerdi|sabato|domenica|morning|evening|afternoon|mattina|sera|pomeriggio)(?!\p{L})",
+          unicode: true,
+        ),
+        '',
+      )
+      .replaceAll(RegExp(r"\b(at|alle|all'|per le|a|on|il|for|di)\s+\d{1,2}([:. ]\d{2})?\s*(am|pm|a m|p m)?"), '')
+      .replaceAll(RegExp(r"\b\d{1,2}([:.]\d{2})?\s*(am|pm)?\b"), '')
+      .replaceAll(RegExp(r"\b(to|in|on)? ?(my|the|il mio|in|nel|al)? ?(calendar|agenda|calendario)\b"), '')
+      .replaceAll(RegExp(r'\s+'), ' ')
+      .trim()
+      .replaceFirst(RegExp(r'^(an event|event|un evento|evento)( called| chiamato)?\s*'), '')
+      .replaceFirst(RegExp(r"^(a|an|un|una|uno|un') "), '')
+      .replaceFirst(RegExp(r'\s+(on|at|il|alle|per|for|the)$'), '')
+      .trim();
+  final orig = {for (final w in original.split(RegExp(r'[\s,.!?;]+'))) w.toLowerCase(): w};
+  t = t.split(' ').map((w) => orig[w] ?? w).join(' ');
+  return t.isEmpty ? '' : t[0].toUpperCase() + t.substring(1);
+}
+
 bool _looksItalian(String s) => _has(s,
     r"\b(il|lo|la|di|che|per|tra|fra|alle|ricordami|imposta|metti|sveglia|svegliami|canzone|meteo|tempo fa|ore sono|domani|oggi|accendi|spegni|attiva|disattiva|cosa|dove|mio|miei|una|uno|un'|della|nei)\b");
 
@@ -154,6 +199,35 @@ AssistantIntent parseAssistantIntent(String text, DateTime now) {
       final orig = {for (final w in text.split(RegExp(r'[\s,.!?;]+'))) w.toLowerCase(): w};
       title = title.split(' ').map((w) => orig[w] ?? w).join(' ');
       return i(IntentKind.reminder, at: at, text: title[0].toUpperCase() + title.substring(1));
+    }
+  }
+
+  // ---- the calendar: "add dinner with Giulia on Friday at 8", "move my 3 pm to 4"
+  final move = RegExp(r"^(?:please )?(?:move|reschedule|shift|push|sposta|rimanda|anticipa)\s+(?:my |the |il |la |l'|lo )?(.+?)\s+(?:to|at|alle|all'|a|per le)\s+(.+)$")
+      .firstMatch(s);
+  if (move != null) {
+    final to = parseTimeOfDay('at ${move.group(2)}', now);
+    if (to != null) {
+      final oldT = RegExp(r"^(?:at )?(\d{1,2})(?:[:. ](\d{2}))?\s*(am|pm|a m|p m)?(?: (?:meeting|event|appointment|riunione|evento|appuntamento))?$")
+          .firstMatch(move.group(1)!);
+      String? old;
+      if (oldT != null) {
+        var h = int.parse(oldT.group(1)!);
+        final ampm = oldT.group(3);
+        if (ampm != null && ampm.startsWith('p') && h < 12) h += 12;
+        old = '${h.toString().padLeft(2, '0')}:${(oldT.group(2) ?? '00').padLeft(2, '0')}';
+      }
+      final what = old == null ? _cleanTitle(move.group(1)!, text) : '';
+      return i(IntentKind.moveEvent, at: _onWeekday(to, move.group(2)!, now), command: old, text: what);
+    }
+  }
+  if (RegExp(r"^(?:please )?(?:add|schedule|create|book|put|aggiungi|fissa|segna|crea|metti in (?:agenda|calendario))\b").hasMatch(s) &&
+      !_has(s, r'\b(timer|reminder|promemoria|alarm|sveglia)\b')) {
+    final at = parseTimeOfDay(s, now);
+    if (at != null) {
+      final body = s.replaceFirst(RegExp(r"^(?:please )?(?:add|schedule|create|book|put|aggiungi|fissa|segna|crea|metti in (?:agenda|calendario))\s*"), '');
+      final title = _cleanTitle(body, text);
+      return i(IntentKind.event, at: _onWeekday(at, s, now), text: title.isEmpty ? (it ? 'Evento' : 'Event') : title);
     }
   }
 

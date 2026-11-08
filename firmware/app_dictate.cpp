@@ -165,7 +165,7 @@ static int hit_buttons(int x, int y, int by) {
 static int wrap_center(const char *text, int y, int width, int size, uint16_t color, int max_lines) {
     const char *p = text;
     char line[100];
-    int lh = 8 * size + 10, lines = 0;
+    int lh = ui_line_height(size, 8 * size + 10), lines = 0;
     while (*p && lines < max_lines) {
         while (*p == ' ') p++;
         int n = 0, best = 0;

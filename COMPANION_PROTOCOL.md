@@ -51,7 +51,7 @@ Phone → watch (`"t"` = type):
 | `{"t":"hi"}` | app connected; the watch answers with `{"e":"hi",...}` |
 | `{"t":"bat","l":85,"c":1}` | phone battery %, charging |
 | `{"t":"med","ti":"Song","ar":"Artist","pl":1,"po":12,"du":200,"v":7,"vm":15,"ah":456}` | now playing: title, artist, playing, position s, duration s, volume, max volume, album cover hash (optional) |
-| `{"t":"ntf","id":123,"ap":"WhatsApp","ti":"Mario","tx":"Ciao!","rp":1,"ic":789}` | notification; `rp` = can be replied to, `ic` = app icon hash (optional). Same `id` again updates it |
+| `{"t":"ntf","id":123,"ap":"WhatsApp","ti":"Mario","tx":"Ciao!","rp":1,"ic":789}` | notification; `rp` = can be replied to, `ic` = app icon hash (optional), `q`: 1 = not urgent - listed without a toast or a buzz ("Buzz only for what matters" in the app). Same `id` again updates it |
 | `{"t":"nrm","id":123}` | notification removed on the phone |
 | `{"t":"call","st":"ring"\|"active"\|"end","id":456,"n":"Mario"}` | call state; `ring` opens the call screen and wakes the watch |
 | `{"t":"find","on":0}` | find-my-phone stopped on the phone side |
@@ -76,7 +76,7 @@ Watch → phone (`"e"` = event):
 | `{"e":"crash","id":7,"txt":"...","sys":"..."}` | diagnostics: last crash report (`txt`, empty if none) and system status text |
 | `{"e":"dict","id":123,"n":1,"f":"_reply.wav"}` | voice reply recorded: download `f` with the notes characteristic, transcribe, answer with `t:"dict"` |
 | `{"e":"dict","id":123,"n":2,"rw":"short","tx":"text"}` | the transcribed reply touched up by the language model before it's sent: `rw` is `short`, `friendly` or `formal`; answered with `t:"dict"` (the new text, or `err` - the old text stays) |
-| `{"e":"asksend"}` | the OK to a message by voice (the assistant's answer had `"do":"send"`); "yes" said as a follow-up does the same. The phone answers `{"t":"sent","ok":1,"to":"Marco"}` |
+| `{"e":"asksend"}` | the OK to something the assistant waits to do: a message by voice, a new calendar event, an event moved (its answer had `"do":"send"` and `"lbl"`, the button's label: Send / Add / Move); "yes" said as a follow-up does the same. The phone answers `{"t":"sent","ok":1,"msg":"Added: Dinner, Friday at 20:00"}` (older apps: `"to"`) |
 | `{"e":"ask","n":1,"f":"_ask.wav"}` | voice assistant question recorded: download `f`, transcribe, act on it, answer with `t:"ask"`. `"fu":1`: a follow-up to the last answer (no wake word), answered in its context |
 | `{"e":"say","w":"notif","id":7}` / `{"e":"say","w":"briefing","x":"Good morning..."}` / `{"e":"say","w":"brief"}` / `{"e":"say","w":"digest"}` / `{"e":"say","w":"recap"}` | say something on the watch's speaker (also Catch me up's summary and tonight's recap): a message (held on the watch; its translation if it has one), the morning briefing (when "Read the morning briefing aloud" is on), the Today card. The answer is a `say:msg.wav` file, played for the next minute, or `t:"say"` with `err` |
 | `{"e":"req"}` | please resend battery + now playing |

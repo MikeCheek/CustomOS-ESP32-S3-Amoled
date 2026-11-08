@@ -13,6 +13,11 @@
 #include "hal_sleep.h"
 #include "phone_link.h"
 #include "app_settings_state.h"
+#include "app_clock.h"
+#include "voice_sr.h"
+#include "hal_rtc.h"
+#include "hal_power.h"
+#include "clock_fmt.h"
 #include <Arduino.h>
 #include <Arduino_GFX_Library.h>
 #include <SD.h>
@@ -26,7 +31,10 @@
 #define FOLLOW_WAIT_MS 4000       // a follow-up: this long to start talking
 #define FOLLOW_MAX    3           // follow-ups in a row before it waits for a tap
 
-enum AskState { A_LISTEN, A_WAIT, A_ANSWER, A_ERROR };
+// A_OFFLINE: the phone is out of reach - quick buttons for what the watch
+// does by itself, and an offline command when the wake word's commands are loaded.
+enum AskState { A_LISTEN, A_WAIT, A_ANSWER, A_ERROR, A_OFFLINE };
+static void draw_offline(Arduino_GFX *g);   // below
 
 static const int CX = LCD_WIDTH / 2, CY = LCD_HEIGHT / 2;
 static AskState s_state = A_ERROR;
@@ -40,6 +48,11 @@ static char s_status[48] = "";
 static char s_chip[40] = "";        // what was done ("Timer 5:00")
 static bool s_send = false;         // a message by voice waits for its OK: the chip is a Send button
 static int s_chip_y = 0, s_chip_w = 0;
+static char s_action_lbl[16] = "Send";
+void assistant_set_action_label(const char *label) {
+    snprintf(s_action_lbl, sizeof(s_action_lbl), "%s", label && label[0] ? label : "Send");
+    ble_fold_utf8(s_action_lbl);
+}
 // voice activity: the noise floor while listening, and when speech was last heard
 static int s_floor = 100;
 static bool s_spoke = false;
@@ -130,7 +143,13 @@ static void start_listening(bool follow = false) {
     s_follow = follow;
     if (!follow) { s_question[0] = s_answer[0] = s_chip[0] = s_status[0] = 0; s_followups = 0; }
     s_speaks = false;
-    if (!phone_link_active()) { fail("Connect the companion app to use the assistant"); return; }
+    if (!phone_link_active()) {
+        // no phone: what the watch can do by itself
+        s_question[0] = s_answer[0] = s_chip[0] = 0;
+        set_state(A_OFFLINE);
+        voice_offline_command();   // nothing when the offline commands aren't there
+        return;
+    }
     if (!sd_is_mounted()) { fail("The assistant needs the SD card"); return; }
     if (audio_is_playing()) audio_stop_playback();
     SD.remove("/Recordings/" ASK_FILE);
@@ -218,7 +237,7 @@ void assistant_on_result(uint32_t seq, const char *question, const char *answer,
     clean(s_answer);
     s_chip[0] = 0;
     s_send = action && !strcmp(action, "send");
-    if (s_send) snprintf(s_chip, sizeof(s_chip), "Send");
+    if (s_send) snprintf(s_chip, sizeof(s_chip), "%s", s_action_lbl);
     if (action && !strcmp(action, "timer")) {
         if (seconds > 0) { char d[16]; fmt_dur(d, sizeof(d), seconds); snprintf(s_chip, sizeof(s_chip), "Timer %s", d); }
         else snprintf(s_chip, sizeof(s_chip), "Timer cancelled");
@@ -236,7 +255,7 @@ void assistant_on_result(uint32_t seq, const char *question, const char *answer,
 static int wrap_center(const char *text, int y, int width, int size, uint16_t color, int max_lines) {
     const char *p = text;
     char line[100];
-    int lh = 8 * size + 10, lines = 0;
+    int lh = ui_line_height(size, 8 * size + 10), lines = 0;
     while (*p && lines < max_lines) {
         while (*p == ' ') p++;
         int n = 0, best = 0;
@@ -302,6 +321,7 @@ static void assist_draw() {
     if (!g) return;
     uint32_t now = millis();
     if (s_hist_view && (s_state == A_ANSWER || s_state == A_ERROR)) { draw_history(g); return; }
+    if (s_state == A_OFFLINE) { draw_offline(g); return; }
     switch (s_state) {
     case A_LISTEN: {
         int lvl = audio_mic_level_percent();
@@ -342,7 +362,7 @@ static void assist_draw() {
                 int w = 150;
                 s_chip_y = y + 4; s_chip_w = w;
                 g->fillRoundRect(CX - w / 2, s_chip_y, w, 44, 22, s_press == 1 ? ui_dim(COLOR_ACCENT, 0.6f) : COLOR_ACCENT);
-                ui_text_center(CX, s_chip_y + 22, COLOR_TEXT, "Send", 2);
+                ui_text_center(CX, s_chip_y + 22, COLOR_TEXT, s_action_lbl, 2);
             } else {
                 int w = ui_text_width(c, 1) + 32;
                 g->fillRoundRect(CX - w / 2, y + 2, w, 30, 15, COLOR_PANEL);
@@ -358,6 +378,49 @@ static void assist_draw() {
         wrap_center(s_answer, CY - 30, 320, 1, COLOR_TEXT_DIM, 4);
         draw_mic_button(g, MIC_Y, MIC_R, s_press == 0 ? ui_dim(COLOR_ACCENT, 0.6f) : COLOR_ACCENT);
         break;
+    }
+}
+
+// ---- the phone out of reach: the watch's own quick actions -------------------------------
+static const char *const OFF_LABEL[4] = {"Timer 5 min", "Timer 10 min", "Stopwatch", "Alarms"};
+static int off_btn(int i, int *x, int *y) {   // 2 x 2, 150 x 56
+    *x = CX - 156 + (i % 2) * 162;
+    *y = CY - 8 + (i / 2) * 66;
+    return 0;
+}
+
+static void draw_offline(Arduino_GFX *g) {
+    ui_text_center(CX, 96, COLOR_TEXT, "No phone right now", 2);
+    char b[48], hm[16];
+    WatchTime t = rtc_now();
+    clock_hm_text(hm, sizeof(hm), t.hour, t.minute);
+    int p = power_get_battery_percent();
+    if (p >= 0) snprintf(b, sizeof(b), "%s  -  battery %d%%", hm, p);
+    else snprintf(b, sizeof(b), "%s", hm);
+    ui_text_center(CX, 126, COLOR_TEXT_DIM, b, 1);
+    bool listening = voice_offline_listening();
+    ui_text_center(CX, 158, listening ? COLOR_ACCENT : COLOR_TEXT_DIM,
+                   listening ? "Say a command: \"set a timer for 5 minutes\"..." : "What the watch can do by itself:", 1);
+    if (listening) {
+        float a = (millis() % 1200) * 0.3f;
+        ui_arc(CX, 190, 14, 4, a, 270, COLOR_ACCENT, true);
+    }
+    for (int i = 0; i < 4; i++) {
+        int x, y;
+        off_btn(i, &x, &y);
+        g->fillRoundRect(x, y, 150, 56, 18, s_press == 30 + i ? ui_dim(COLOR_ACCENT, 0.6f) : COLOR_PANEL);
+        ui_text_center(x + 75, y + 28, COLOR_TEXT, OFF_LABEL[i], 1);
+    }
+    if (voice_commands_installed() && !listening)
+        ui_text_center(CX, LCD_HEIGHT - 70, COLOR_ACCENT, "Tap here to say a command", 1);
+}
+
+static void offline_tap(int i) {
+    switch (i) {
+    case 0: assistant_timer_set(5 * 60); ui_show_toast("Timer: 5 min", 2000); break;
+    case 1: assistant_timer_set(10 * 60); ui_show_toast("Timer: 10 min", 2000); break;
+    case 2: ui_push(&stopwatch_screen); break;
+    case 3: ui_push(&alarms_screen); break;
     }
 }
 
@@ -416,6 +479,26 @@ static void assist_touch(int x, int y, bool pressed) {
         return;
     }
     if (s_state == A_WAIT) return;
+    if (s_state == A_OFFLINE) {
+        int hit = -1;
+        for (int i = 0; i < 4; i++) {
+            int bx, by;
+            off_btn(i, &bx, &by);
+            if (x >= bx && x < bx + 150 && y >= by && y < by + 56) hit = 30 + i;
+        }
+        if (hit < 0 && y > LCD_HEIGHT - 100) hit = 40;   // say a command
+        if (edge) s_press = hit;
+        if (pressed) return;
+        int p = s_press;
+        s_press = -1;
+        if (p != hit) return;
+        if (p >= 30 && p < 34) offline_tap(p - 30);
+        else if (p == 40) {
+            if (phone_link_active()) start_listening();   // the phone came back
+            else if (!voice_offline_command()) ui_show_toast("Offline commands need the wake word on (Settings > Voice)", 2500);
+        }
+        return;
+    }
     bool on_mic = (x - CX) * (x - CX) + (y - MIC_Y) * (y - MIC_Y) < (MIC_R + 14) * (MIC_R + 14);
     bool on_send = s_send && s_state == A_ANSWER && abs(x - CX) < s_chip_w / 2 + 6 && y >= s_chip_y - 6 && y < s_chip_y + 50;
     if (edge) s_press = on_mic ? 0 : (on_send ? 1 : -1);
@@ -426,7 +509,7 @@ static void assist_touch(int x, int y, bool pressed) {
         s_send = false;
         s_chip[0] = 0;
         s_follow_ok = false;
-        ui_show_toast(ble_link_send("{\"e\":\"asksend\"}") ? "Sending..." : "Phone not reachable", 1500);
+        ui_show_toast(ble_link_send("{\"e\":\"asksend\"}") ? "On it..." : "Phone not reachable", 1500);
         return;
     }
     if (p == 0 && on_mic) { s_follow_ok = false; start_listening(); }
@@ -492,9 +575,9 @@ Screen timer_alert_screen = {
     0, true,
 };
 
-void assistant_on_sent(bool ok, const char *to) {
+void assistant_on_sent(bool ok, const char *msg) {
     char b[64];
-    snprintf(b, sizeof(b), ok ? "Sent to %s" : "Couldn't send it to %s", to && to[0] ? to : "them");
+    snprintf(b, sizeof(b), "%s", msg && msg[0] ? msg : (ok ? "Done" : "Couldn't do it"));
     ble_fold_utf8(b);
     ui_show_toast(b, 2000);
     if (s_open && s_state == A_ANSWER) { s_send = false; s_chip[0] = 0; }

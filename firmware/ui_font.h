@@ -33,6 +33,9 @@ UiFont ui_font_for_size(int size);
 // Pixel width (advance) of UTF-8 text.
 int  ui_font_width(UiFont f, const char *utf8);
 int  ui_font_cap_height(UiFont f);
+// The distance between lines of wrapped text drawn at [size], at least [min]:
+// grows with Settings > Display > Text size, so bigger letters don't overlap.
+int  ui_line_height(int size, int min);
 
 // Draw with the baseline at y.
 void ui_font_draw(int x, int baseline_y, UiFont f, uint16_t color, const char *utf8);

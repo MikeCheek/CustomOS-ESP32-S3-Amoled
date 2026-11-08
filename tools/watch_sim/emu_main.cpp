@@ -540,8 +540,25 @@ __attribute__((visibility("default"))) int emu_selftest() {
         char rc[128];
         check(comp_recap(rc, sizeof(rc)) && !strcmp(rc, "A calm day: two memos, one to-do left.") &&
                   assistant_speech_expected(), "recap: kept for the card, and said");
+        // no phone: the watch's own quick actions, no recording
+        emu_set_connected(0);
+        assistant_timer_set(0);
+        ui_push(&assistant_screen);
+        for (int i = 0; i < 3; i++) emu_step();
+        check(!audio_is_recording(), "assistant offline: nothing recorded for a phone that isn't there");
+        emu_touch(233 - 156 + 75, 233 - 8 + 28, 1); emu_step(); emu_touch(233 - 156 + 75, 233 - 8 + 28, 0); emu_step();
+        check(assistant_timer_active() && assistant_timer_left_s() > 290 && assistant_timer_left_s() <= 300,
+              "assistant offline: Timer 5 min works without the phone");
+        assistant_timer_set(0);
+        ui_pop_screen();
+        emu_step();
         sim_set_mic_level(0);
         emu_set_connected(was);
+        if (was) {   // the link comes back as the app would bring it back
+            emu_link_push("{\"t\":\"hi\"}");
+            emu_step();
+            pop_all(m, sizeof(m), "\"e\"");
+        }
     }
     // ---- the Casino: roulette pays, the shared wallet
     {

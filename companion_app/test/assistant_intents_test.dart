@@ -65,4 +65,21 @@ void main() {
     expect(p('Ricordami di chiamare la mamma alle 18').kind, IntentKind.reminder);
     expect(p('Che ore sono?').italian, isTrue);
   });
+
+  test('calendar: add and move events, in English and Italian', () {
+    // now: Monday 2 Nov 2026, 9:15
+    final a = p('Add dinner with Giulia on Friday at 8 pm');
+    expect((a.kind, a.text, a.at), (IntentKind.event, 'Dinner with Giulia', DateTime(2026, 11, 6, 20)));
+    final b = p('Schedule a meeting with Sara tomorrow at 10:30');
+    expect((b.kind, b.text, b.at), (IntentKind.event, 'Meeting with Sara', DateTime(2026, 11, 3, 10, 30)));
+    final c = p('Aggiungi cena con Luca venerdì alle 20');
+    expect((c.kind, c.text, c.at), (IntentKind.event, 'Cena con Luca', DateTime(2026, 11, 6, 20)));
+    final d = p('Move my 3 pm to 4');
+    expect((d.kind, d.command, d.at), (IntentKind.moveEvent, '15:00', DateTime(2026, 11, 2, 16)));
+    final e = p('Move the design review to 5 pm');
+    expect((e.kind, e.command, e.text, e.at), (IntentKind.moveEvent, null, 'Design review', DateTime(2026, 11, 2, 17)));
+    final f = p('Sposta la riunione alle 11');
+    expect((f.kind, f.text), (IntentKind.moveEvent, 'Riunione'));
+    expect(p('Add a timer for 5 minutes').kind, IntentKind.timer); // not an event
+  });
 }
