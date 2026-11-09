@@ -137,7 +137,7 @@ static const Tile TILES[T_COUNT] = {
 // What each tile is, shown while it's held (before it acts on release)
 static const char *const TILE_NAME[T_COUNT] = {
     "Wi-Fi", "Bluetooth", "GPS", "Notifications",
-    "All sounds", "Game music", "Auto-rotate", "Keep screen on",
+    "System sounds", "Game sounds", "Auto-rotate", "Keep screen on",
     "Battery mode", "Torch", "USB mode", "Lock",
     "Settings", "Power",
 };
@@ -210,12 +210,12 @@ static void tile_tap(int t) {
     case T_SFX:
         g_app_settings.sfx_enabled = !g_app_settings.sfx_enabled;
         nvs_save_settings(g_app_settings);
-        caption(g_app_settings.sfx_enabled ? "All sounds on" : "Sounds off - alarms still ring");
+        caption(g_app_settings.sfx_enabled ? "System sounds on" : "System sounds off - alarms still ring");
         break;
     case T_MUSIC:
         g_app_settings.music_enabled = !g_app_settings.music_enabled;
         nvs_save_settings(g_app_settings);
-        caption(g_app_settings.music_enabled ? "Game music on" : "Game music off - sounds stay");
+        caption(g_app_settings.music_enabled ? "Game sounds on" : "Game sounds off - music and effects");
         break;
     case T_ROTATE:
         if (!g_app_settings.auto_rotate && !g_app_settings.tilt_calibrated) {
@@ -329,7 +329,7 @@ static void draw_icon(Arduino_GFX *g, int t, int cx, int cy, uint16_t c, uint16_
         icon_speaker(g, cx - 2, cy, c, bg, on, !on);
         break;
     case T_MUSIC:
-        // a gamepad with a note over it: music in games (the speaker tile is every sound)
+        // a gamepad with a note over it: the games' music and effects (the speaker is the rest)
         g->fillRoundRect(cx - 16, cy + 1, 32, 15, 7, c);
         g->fillRect(cx - 11, cy + 7, 8, 3, bg);           // the d-pad
         g->fillRect(cx - 8, cy + 4, 3, 9, bg);

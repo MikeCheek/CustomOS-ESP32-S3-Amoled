@@ -22,7 +22,8 @@ Built on Arduino + Arduino_GFX, no LVGL.
   - the morning briefing; 30 nights of sleep
   - the camera remote, including with the phone's own camera app (Android)
   - the floating watch on Android
-  - Breathe by sound; clearer sound switches
+  - Breathe by sound; two sound switches: System sounds (messages, reminders, apps - alarms always ring) and Game
+    sounds (the games' music and effects)
   - the Casino (with Roulette, Video Poker and Hi-Lo Dice, stats and a daily bonus); the new Maze Raider
   - the assistant listens for a follow-up after a spoken answer ("and tomorrow?"), with no wake word
   - spoken answers without an SD card; messages read aloud (hold one); the morning briefing said aloud

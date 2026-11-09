@@ -661,12 +661,18 @@ __attribute__((visibility("default"))) int emu_selftest() {
         check(tones() == 0, "sound: Notification sounds off - no tune");
         g_app_settings.sound_cues = true; g_app_settings.sfx_enabled = false;
         haptic(HAP_NOTIFY);
-        check(tones() == 0, "sound: All sounds off - no message tune");
+        check(tones() == 0, "sound: System sounds off - no message tune");
         game_sfx_score();
-        check(tones() == 0, "sound: All sounds off - no game effects");
+        check(tones() > 0, "sound: System sounds off - the games still play theirs");
         g_app_settings.sfx_enabled = true;
+        g_app_settings.music_enabled = false;
         game_sfx_score();
-        check(tones() > 0, "sound: game effects with All sounds on");
+        check(tones() == 0, "sound: Game sounds off - no game effects");
+        haptic(HAP_NOTIFY);
+        check(tones() > 0, "sound: Game sounds off - messages still play");
+        g_app_settings.music_enabled = true;
+        game_sfx_score();
+        check(tones() > 0, "sound: game effects with Game sounds on");
         // Game music: nothing while it's off, it starts when turned on, stops when off again
         SD.mkdir("/music");
         { File f = SD.open("/music/test.mp3", FILE_WRITE); if (f) { f.write((const uint8_t *)"ID3", 3); f.close(); } }
@@ -681,7 +687,7 @@ __attribute__((visibility("default"))) int emu_selftest() {
         g_app_settings.music_enabled = false;
         game_music_poll();
         check(!audio_is_playing(), "sound: Game music off mid-game - it stops");
-        // Breathe: a chime to start, notes as each breath turns - and none with All sounds off
+        // Breathe: a chime to start, notes as each breath turns - and none with System sounds off
         for (int pass = 0; pass < 2; pass++) {
             g_app_settings.sfx_enabled = pass == 0;
             tones();
@@ -694,7 +700,7 @@ __attribute__((visibility("default"))) int emu_selftest() {
             emu_step();
             printf("breathe pass %d: %d tones\n", pass, n);
             if (pass == 0) check(n >= 7, "sound: Breathe - a start chime and notes for in and out");
-            else check(n == 0, "sound: Breathe - silent with All sounds off");
+            else check(n == 0, "sound: Breathe - silent with System sounds off");
         }
         g_app_settings.sfx_enabled = true;
         game_music_stop();

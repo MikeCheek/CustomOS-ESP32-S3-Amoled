@@ -350,8 +350,8 @@ static SettingsRow ROWS_SOUND[] = {
     { "Volume", "Speaker volume level", ROW_SUBSCREEN, nullptr, nullptr, &settings_volume_screen, ICON_VOLUME },
     { "Voice", "Wake word, commands, voice cleanup", ROW_SUBSCREEN, nullptr, nullptr, &settings_voice_screen, ICON_SOUND },
     { "Microphone", "Recording sensitivity", ROW_SUBSCREEN, nullptr, nullptr, &settings_mic_screen, ICON_SOUND },
-    { "All sounds", "Messages, apps, games", ROW_TOGGLE, get_sfx, tap_sfx, nullptr, ICON_SOUND },
-    { "Game music", "Games' music, from SD /music", ROW_TOGGLE, get_music, tap_music, nullptr, ICON_SOUND },
+    { "System sounds", "Messages, reminders, the assistant, apps - alarms always ring", ROW_TOGGLE, get_sfx, tap_sfx, nullptr, ICON_SOUND },
+    { "Game sounds", "Games' music and effects", ROW_TOGGLE, get_music, tap_music, nullptr, ICON_SOUND },
     { "Haptic on Touch", "Vibrate briefly on every tap", ROW_TOGGLE, get_haptic, tap_haptic, nullptr, ICON_VIBRATION },
     { "Notification sounds", "A tune per message, goal", ROW_TOGGLE, get_cues, tap_cues, nullptr, ICON_SOUND },
 };

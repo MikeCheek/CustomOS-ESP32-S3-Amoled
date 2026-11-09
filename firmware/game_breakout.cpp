@@ -1190,11 +1190,11 @@ static void breakout_draw() {
         snprintf(vbuf, sizeof(vbuf), "%d%%", (int)g_app_settings.volume);
         ui_draw_centered_text_at(LCD_WIDTH / 2, 158, COLOR_TEXT, vbuf, 1);
 
-        bool sfx = g_app_settings.sfx_enabled;
+        bool sfx = game_sounds_on();
         g->fillRoundRect(bx, 210, bw, 40, 10, sfx ? COLOR_GOOD : COLOR_PANEL);
         g->drawRoundRect(bx, 210, bw, 40, 10, sfx ? COLOR_GOOD : COLOR_TEXT_DIM);
         ui_draw_centered_text_at(LCD_WIDTH / 2, 224, sfx ? COLOR_TEXT : COLOR_TEXT_DIM,
-                                 sfx ? "SFX: On" : "SFX: Off", 2);
+                                 sfx ? "Game sounds: On" : "Game sounds: Off", 2);
 
         g->fillRoundRect(bx, 270, bw, 40, 10, COLOR_ACCENT2);
         ui_draw_centered_text_at(LCD_WIDTH / 2, 284, COLOR_TEXT, "Resume", 2);
@@ -1421,7 +1421,7 @@ static void breakout_touch(int x, int y, bool pressed) {
         if (!tap_edge) return; // everything below here is a one-shot button tap, not a drag
         // SFX toggle
         if (y >= 210 && y <= 250 && x >= bx && x <= bx + bw) {
-            g_app_settings.sfx_enabled = !g_app_settings.sfx_enabled;
+            g_app_settings.music_enabled = !g_app_settings.music_enabled;
             nvs_save_settings(g_app_settings);
             return;
         }

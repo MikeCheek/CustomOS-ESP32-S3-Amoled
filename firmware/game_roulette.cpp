@@ -253,7 +253,7 @@ static void roulette_tick() {
     float rel = ball_angle(t) - wheel_angle(t);
     int fret = (int)floorf(rel / step);
     if (fret != s_last_fret) {
-        if (s_last_fret != -1 && g_app_settings.sfx_enabled && t > 0.35f) audio_play_sfx(2600, 6);
+        if (s_last_fret != -1 && game_sounds_on() && t > 0.35f) audio_play_sfx(2600, 6);
         s_last_fret = fret;
     }
     if (t >= 1) settle();

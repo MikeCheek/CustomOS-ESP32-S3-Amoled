@@ -685,7 +685,7 @@ static uint32_t s_br_start = 0;   // 0: choosing the length; set ahead of now fo
 static int s_br_phase = -1;
 static const uint32_t BR_LEAD = 2200;   // the start chime, then the first breath
 
-// Sounds to breathe by with the eyes closed (with All sounds on): soft
+// Sounds to breathe by with the eyes closed (with System sounds on): soft
 // piano notes, each phase its own shape -
 //   start: a quick rising C-E-G        in: two notes stepping up (A-E)
 //   out:   the same two stepping down  end: a falling run onto a full chord
@@ -727,7 +727,7 @@ static void br_draw() {
         ui_text_center(CX, 228, COLOR_TEXT_DIM, "Follow the circle: in as it grows, out as it shrinks", 1);
         ui_text_center(CX, 246, COLOR_TEXT_DIM,
                        g_app_settings.sfx_enabled ? "Eyes closed? Notes go up: in, down: out"
-                                                  : "All sounds on: breathe by sound", 1);
+                                                  : "System sounds on: breathe by sound", 1);
         static const int L[3] = {1, 3, 5};
         for (int i = 0; i < 3; i++) {
             int x = CX - 120 + i * 120;

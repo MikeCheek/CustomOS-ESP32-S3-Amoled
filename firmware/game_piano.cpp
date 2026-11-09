@@ -334,7 +334,7 @@ static uint16_t note_ms(const Tile &t) {
     return (uint16_t)constrain(ms * 1.05f, 220.0f, 2400.0f);
 }
 static void play_tile(const Tile &t) {
-    if (!g_app_settings.sfx_enabled) return;
+    if (!game_sounds_on()) return;
     uint8_t m[4] = { t.midi, 0, 0, 0 };
     int n = 1;
     for (int k = 0; k < 3; k++)
