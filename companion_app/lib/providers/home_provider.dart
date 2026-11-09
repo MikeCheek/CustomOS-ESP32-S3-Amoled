@@ -65,6 +65,7 @@ const homeActions = [
   HomeAction('settings', 'Settings', Icons.settings_outlined),
   HomeAction('face', 'The face\'s own', Icons.photo_outlined),
   HomeAction('wallet', 'Wallet', Icons.qr_code_2_rounded),
+  HomeAction('notifmode', 'Notification mode', Icons.notifications_paused_outlined),
 ];
 
 HomeAction homeAction(String key) => homeActions.firstWhere((a) => a.key == key, orElse: () => homeActions.first);
@@ -122,6 +123,7 @@ const allTiles = [
   TileInfo('alarm', 'Alarm', 'The next one', Icons.alarm_rounded),
   TileInfo('reminders', 'Reminders', 'The first ones', Icons.checklist_rounded),
   TileInfo('battery', 'Battery', 'Watch and phone', Icons.battery_5_bar_rounded),
+  TileInfo('notif', 'Notifications', 'In full, icon only or silenced - a tap', Icons.notifications_outlined),
 ];
 
 /// The watch face's gestures and Tiles, as the watch reports them

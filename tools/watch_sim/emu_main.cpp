@@ -560,6 +560,27 @@ __attribute__((visibility("default"))) int emu_selftest() {
             pop_all(m, sizeof(m), "\"e\"");
         }
     }
+    // ---- notifications: in full -> icon only -> silenced, from anywhere
+    {
+        bool was = g_sim.phone;
+        emu_set_connected(1);
+        notif_mode_set(NM_FULL);
+        pop_all(m, sizeof(m), "\"e\"");
+        check(notif_mode_next() == NM_ICON && !dnd_manual(), "notif mode: full -> icon only (not DND)");
+        check(pop_all(m, sizeof(m), "\"e\":\"nmode\"") == 1 && strstr(m, "\"m\":1"), "notif mode: the app is told");
+        check(notif_mode_next() == NM_SILENT && dnd_manual(), "notif mode: icon only -> silenced (DND on)");
+        check(notif_mode_next() == NM_FULL && !dnd_manual() && g_app_settings.notif_style == 0, "notif mode: -> in full again");
+        pop_all(m, sizeof(m), "\"e\"");   // what the steps above told the app
+        emu_link_push("{\"t\":\"nmode\",\"m\":1}");
+        emu_step();
+        check(notif_mode() == NM_ICON && pop_all(m, sizeof(m), "\"e\":\"nmode\"") == 0,
+              "notif mode: set from the app (not echoed back)");
+        home_run(HA_NOTIF_MODE);
+        check(notif_mode() == NM_SILENT, "notif mode: a home gesture steps it too");
+        notif_mode_set(NM_FULL);
+        pop_all(m, sizeof(m), "\"e\"");
+        emu_set_connected(was);
+    }
     // ---- the Casino: roulette pays, the shared wallet
     {
         int32_t out[9] = {}, num[37] = {};

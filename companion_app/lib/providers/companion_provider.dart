@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:collection';
 import 'dart:io';
+import 'package:flutter/foundation.dart' show ValueNotifier;
 import 'dart:typed_data';
 import 'package:path_provider/path_provider.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -546,6 +547,9 @@ class CompanionNotifier extends StateNotifier<CompanionState> {
           (e['n'] as num?)?.toInt() ?? 0,
           e['f'] as String? ?? '',
         );
+        break;
+      case 'nmode':
+        watchNotifMode.value = (e['m'] as num?)?.toInt() ?? 0;
         break;
       case 'asksend':
         await _sendPending();
@@ -1297,6 +1301,15 @@ class CompanionNotifier extends StateNotifier<CompanionState> {
     } catch (x) {
       await err(_clip(x.toString().replaceFirst('Exception: ', ''), 80));
     }
+  }
+
+  /// How notifications show on the watch: 0 in full, 1 icon only, 2 silenced
+  /// (dnd.h notif_mode; -1 until the watch says). Set from the Notifications screen.
+  static final watchNotifMode = ValueNotifier<int>(-1);
+
+  Future<void> setWatchNotifMode(int m) async {
+    watchNotifMode.value = m;
+    if (_ble.hasPhoneLink) await _ble.sendLink({'t': 'nmode', 'm': m});
   }
 
   /// The phone's language as a 2-letter code ("it", "en").

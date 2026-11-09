@@ -213,6 +213,9 @@ void ui_fill_circle_rect(int x, int y, int w, int h, int r, uint16_t color);
 void ui_show_toast(const char *text, uint32_t duration_ms = 2500);
 // Same, with a phone app icon (phone_images.h hash) at the left.
 void ui_show_toast_icon(const char *text, uint32_t duration_ms, uint32_t icon);
+// A small pop-up with just the app's icon (or its name, short, until the icon
+// is here): notifications in "Icon only" mode (dnd.h notif_mode).
+void ui_show_toast_badge(uint32_t icon, const char *app, uint32_t duration_ms);
 void ui_draw_toast();
 bool ui_toast_active();
 // Hit-tests (x,y) against the currently-drawn toast and dismisses it if

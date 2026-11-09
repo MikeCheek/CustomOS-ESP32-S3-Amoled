@@ -136,7 +136,7 @@ static const Tile TILES[T_COUNT] = {
 
 // What each tile is, shown while it's held (before it acts on release)
 static const char *const TILE_NAME[T_COUNT] = {
-    "Wi-Fi", "Bluetooth", "GPS", "Do not disturb",
+    "Wi-Fi", "Bluetooth", "GPS", "Notifications",
     "All sounds", "Game music", "Auto-rotate", "Keep screen on",
     "Battery mode", "Torch", "USB mode", "Lock",
     "Settings", "Power",
@@ -147,7 +147,7 @@ static bool tile_on(int t) {
     case T_WIFI:   return g_app_settings.wifi_on;
     case T_BT:     return ble_is_enabled();
     case T_GPS:    return gps_is_enabled();
-    case T_DND:    return dnd_active();
+    case T_DND:    return dnd_active() || notif_mode() == NM_ICON;   // lit unless they show in full
     case T_SFX:    return g_app_settings.sfx_enabled;
     case T_MUSIC:  return g_app_settings.music_enabled;
     case T_ROTATE: return g_app_settings.auto_rotate;
@@ -197,12 +197,15 @@ static void tile_tap(int t) {
         on = !gps_is_enabled(); set_gps(on); caption(on ? "GPS on" : "GPS off");
         break;
     case T_DND:
+        // three steps: in full -> icon only -> silenced (dnd.h)
         if (dnd_bedtime_now() && !dnd_manual()) {
             caption("Bedtime - change it in Settings");
             break;
         }
-        dnd_set(!dnd_manual(), false);   // the phone follows, if DND sync is on in the app
-        caption(dnd_manual() ? "Notifications silenced" : "Notifications on");
+        {
+            NotifMode m = notif_mode_next();   // silenced: the phone follows, if DND sync is on in the app
+            caption(m == NM_FULL ? "Notifications in full" : m == NM_ICON ? "Notifications: icon only" : "Notifications silenced");
+        }
         break;
     case T_SFX:
         g_app_settings.sfx_enabled = !g_app_settings.sfx_enabled;
@@ -303,10 +306,25 @@ static void draw_icon(Arduino_GFX *g, int t, int cx, int cy, uint16_t c, uint16_
         g->fillTriangle(cx - 10, cy - 1, cx + 10, cy - 1, cx, cy + 15, c);
         g->fillCircle(cx, cy - 5, 4, bg);
         break;
-    case T_DND:
-        g->fillCircle(cx, cy, 13, c);
-        g->fillCircle(cx + 8, cy - 6, 11, bg);
+    case T_DND: {
+        NotifMode m = dnd_bedtime_now() ? NM_SILENT : notif_mode();
+        if (m == NM_SILENT) {                 // a moon: silenced
+            g->fillCircle(cx, cy, 13, c);
+            g->fillCircle(cx + 8, cy - 6, 11, bg);
+        } else {                              // a bell; icon only: a small dot beside it, no lines
+            g->fillCircle(cx, cy - 2, 11, c);
+            g->fillRect(cx - 11, cy - 2, 23, 10, c);
+            g->fillRoundRect(cx - 15, cy + 7, 31, 5, 2, c);
+            g->fillCircle(cx, cy + 15, 3, c);
+            if (m == NM_FULL) {               // the text: two lines on the bell
+                g->fillRect(cx - 6, cy - 4, 12, 2, bg);
+                g->fillRect(cx - 6, cy + 1, 9, 2, bg);
+            } else {
+                g->fillCircle(cx + 13, cy - 11, 5, c);
+            }
+        }
         break;
+    }
     case T_SFX:
         icon_speaker(g, cx - 2, cy, c, bg, on, !on);
         break;
@@ -537,7 +555,8 @@ void ui_top_panel_draw() {
         cap = s_caption;
     } else {
         cap_c = COLOR_TEXT_DIM;
-        if (dnd_active())                cap = dnd_manual() ? "Do not disturb" : "Bedtime - do not disturb";
+        if (dnd_active())                cap = dnd_manual() ? "Notifications silenced" : "Bedtime - do not disturb";
+        else if (notif_mode() == NM_ICON) cap = "Notifications: icon only";
         else if (ble_is_connected())     cap = "Phone connected";
         else if (wifi_is_connected())    cap = "Wi-Fi connected";
         else if (usb_cable_present())    { snprintf(buf, sizeof(buf), "USB: %s", usb_mode_name(usb_mode_active())); cap = buf; }

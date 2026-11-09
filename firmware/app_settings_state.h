@@ -90,6 +90,9 @@ struct AppSettings {
     // Do not disturb: notifications still arrive and go to the history,
     // just without the pop-up toast (app_notifications.cpp).
     bool dnd_on = false;
+    // How a notification shows when it isn't silenced (dnd.h notif_mode):
+    // 0 the full pop-up (icon, who and the text), 1 just the app's icon.
+    uint8_t notif_style = 0;
     bool dnd_bedtime = false;                // DND every night (dnd.cpp)
     uint16_t dnd_from_min = 23 * 60;         // bedtime start, minutes after midnight
     uint16_t dnd_to_min = 7 * 60;            // bedtime end

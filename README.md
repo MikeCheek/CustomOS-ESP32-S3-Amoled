@@ -36,6 +36,8 @@ Built on Arduino + Arduino_GFX, no LVGL.
     Sundays the recap adds the week's sleep, steps and workouts; only what matters buzzes; with the phone out of
     reach the assistant offers the watch's own timers, stopwatch and alarms (and offline commands); larger text
     spaced to fit
+  - notifications in three steps - in full, icon only, silenced - from the control panel, Settings, a Tile, a
+    home gesture or the app
 - **In the app:** AI models > Speed > "Test the language model" checks the model in use; one that keeps answering
   garbled text is replaced by another installed model, and the app says so.
 - **New in the app, checked on a phone:** the voices speak again (sherpa-onnx 2 needs its text turned into phonemes

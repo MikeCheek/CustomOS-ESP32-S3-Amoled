@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:permission_handler/permission_handler.dart';
 import '../providers/ble_provider.dart';
+import '../providers/companion_provider.dart';
 import '../providers/settings_provider.dart';
 import '../services/notif_priority.dart';
 import '../theme/app_theme.dart';
@@ -163,6 +164,45 @@ class _NotificationsScreenState extends ConsumerState<NotificationsScreen> with 
                 subtitle: 'Reply and dismiss from the watch',
                 value: s.forwardNotifications && _hasAccess,
                 onChanged: _setForward,
+              ),
+              ValueListenableBuilder<int>(
+                valueListenable: CompanionNotifier.watchNotifMode,
+                builder: (context, m, _) => Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'On the watch',
+                        style: TextStyle(color: AppColors.text, fontSize: 15, fontWeight: FontWeight.w600),
+                      ),
+                      const SizedBox(height: 8),
+                      SegmentedButton<int>(
+                        segments: const [
+                          ButtonSegment(value: 0, icon: Icon(Icons.notifications_rounded), label: Text('In full')),
+                          ButtonSegment(value: 1, icon: Icon(Icons.apps_rounded), label: Text('Icon only')),
+                          ButtonSegment(value: 2, icon: Icon(Icons.bedtime_rounded), label: Text('Silenced')),
+                        ],
+                        selected: {if (m >= 0) m},
+                        emptySelectionAllowed: true,
+                        onSelectionChanged: (v) {
+                          if (v.isNotEmpty) ref.read(companionProvider.notifier).setWatchNotifMode(v.first);
+                        },
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        m < 0
+                            ? 'Connect the watch to see how it shows them'
+                            : const [
+                                'The icon, who and the text pop up',
+                                'Just the app\'s icon pops up - read it when you like',
+                                'Nothing pops up or buzzes; they wait in the list',
+                              ][m],
+                        style: const TextStyle(color: AppColors.textDim, fontSize: 12.5),
+                      ),
+                    ],
+                  ),
+                ),
               ),
               ToggleRow(
                 icon: Icons.vibration_rounded,

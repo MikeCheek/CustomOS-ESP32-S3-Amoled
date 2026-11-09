@@ -65,6 +65,7 @@ Phone → watch (`"t"` = type):
 | `{"t":"ask","n":1,"st":"Thinking"}` | voice assistant progress (shown while the watch waits) |
 | `{"t":"ask","n":1,"q":"heard","a":"answer","do":"timer","s":300}` / `{"t":"ask","n":1,"err":"why"}` | voice assistant result; `do`/`s` optional: `timer` sets the watch timer to `s` seconds (0 cancels). `"sp":1`: the answer is being said (a `say:` file follows); `"fl":1` too: once it has played, the watch listens 4 s for a follow-up |
 | `{"t":"recap","x":"A calm day..."}` | the evening recap (at the time set in the app, or when the watch connects after it): kept for the Smart Stack's RECAP card until 4:00, and said right after (a `say:recap.wav` file) |
+| `{"t":"nmode","m":1}` | how notifications show on the watch: 0 in full (icon, who, text), 1 icon only, 2 silenced (Do not disturb). The watch answers `{"e":"nmode","m":n}` after `hi` and whenever it changes there (the control panel's button, Settings, the Tile, a home gesture) |
 | `{"t":"say","err":"why"}` | the phone couldn't say what the watch asked for (`e:"say"`): no voice installed, the message is gone... shown as a toast |
 
 Watch → phone (`"e"` = event):

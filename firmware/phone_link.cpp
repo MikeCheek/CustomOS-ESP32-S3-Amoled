@@ -126,6 +126,11 @@ static void handle(const char *msg) {
         fitness_send_history();   // the rings' older days (the status report has the last 7)
         sleeptrack_send();        // the last 30 nights
         life_send(true);          // the Life screen: today and the last days
+        {                         // how notifications show (the app's Notifications screen)
+            char nm[32];
+            snprintf(nm, sizeof(nm), "{\"e\":\"nmode\",\"m\":%d}", (int)notif_mode());
+            ble_link_send(nm);
+        }
     } else if (!strcmp(t, "bat")) {
         s_active = true;
         s_phone_bat = doc["l"] | -1;
@@ -233,6 +238,8 @@ static void handle(const char *msg) {
         comp_set_todos(doc["n"] | 0, doc["top"] | "");
     } else if (!strcmp(t, "brief")) {
         comp_set_brief(doc["v"] | "", doc["l"] | "", doc["x"] | "");
+    } else if (!strcmp(t, "nmode")) {
+        notif_mode_set((NotifMode)((doc["m"] | 0) % 3), true);
     } else if (!strcmp(t, "sent")) {
         const char *m = doc["msg"] | "";
         char legacy[48];

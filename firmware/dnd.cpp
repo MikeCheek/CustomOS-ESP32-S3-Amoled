@@ -33,6 +33,45 @@ void dnd_set(bool on, bool from_phone) {
     }
 }
 
+// ---- Notification mode ---------------------------------------------------------------
+
+NotifMode notif_mode() {
+    if (dnd_manual()) return NM_SILENT;
+    return g_app_settings.notif_style == 1 ? NM_ICON : NM_FULL;
+}
+
+void notif_mode_set(NotifMode m, bool from_phone) {
+    if (m > NM_SILENT) m = NM_FULL;
+    NotifMode was = notif_mode();
+    if (m != NM_SILENT) {
+        uint8_t st = m == NM_ICON ? 1 : 0;
+        if (g_app_settings.notif_style != st) { g_app_settings.notif_style = st; nvs_save_settings(g_app_settings); }
+    }
+    dnd_set(m == NM_SILENT, from_phone);   // the phone follows DND, if DND sync is on in the app
+    if (!from_phone && m != was && ble_is_connected()) {
+        char b[32];
+        snprintf(b, sizeof(b), "{\"e\":\"nmode\",\"m\":%d}", (int)m);
+        ble_link_send(b);
+    }
+}
+
+NotifMode notif_mode_next() {
+    NotifMode n = (NotifMode)((notif_mode() + 1) % 3);
+    notif_mode_set(n);
+    return n;
+}
+
+const char *notif_mode_name(NotifMode m) {
+    static const char *const N[] = {"Show in full", "Icon only", "Silenced"};
+    return N[m <= NM_SILENT ? m : 0];
+}
+
+const char *notif_mode_hint(NotifMode m) {
+    static const char *const H[] = {"Icon, who and the text pop up", "Just the app's icon pops up",
+                                    "Nothing pops up or buzzes - all in the list"};
+    return H[m <= NM_SILENT ? m : 0];
+}
+
 // ---- Quick replies -----------------------------------------------------------------
 
 static const char *const DEFAULTS[] = {

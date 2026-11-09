@@ -33,6 +33,7 @@ enum HomeAction : uint8_t {
     HA_ASSISTANT, HA_MUSIC, HA_PLAYPAUSE, HA_TIMER, HA_STOPWATCH, HA_WORKOUT, HA_TORCH, HA_RECORDER,
     HA_LIFE, HA_ACTIVITY, HA_WEATHER, HA_CALENDAR, HA_SETTINGS, HA_FACE_OWN,
     HA_WALLET,   // new ones go last: the settings keep the numbers
+    HA_NOTIF_MODE,   // notifications: in full -> icon only -> silenced (dnd.h)
     HA_COUNT
 };
 
@@ -40,9 +41,12 @@ enum HomeSlot : uint8_t { HS_TAP, HS_DOUBLE, HS_HOLD, HS_UP, HS_DOWN, HS_LEFT, H
 
 enum TileKind : uint8_t {
     TL_ACTIVITY, TL_WEATHER, TL_NEXT, TL_MUSIC, TL_TIMER, TL_LIFE, TL_WORLD, TL_ALARM, TL_REMINDERS, TL_BATTERY,
+    TL_NOTIF,    // notifications: in full / icon only / silenced, a tap for the next (new ones go last)
     TL_COUNT
 };
-#define TILES_MAX TL_COUNT
+// How many tiles can be shown at once - the size kept in the settings (NVS),
+// so it stays 10 even as kinds are added.
+#define TILES_MAX 10
 #define TILE_END 0xFF
 
 const char *home_action_name(HomeAction a);   // "Apps"

@@ -7,6 +7,8 @@
 #include "ui.h"
 #include "app_face_nav.h"
 #include "complications.h"
+#include "dnd.h"
+#include "home_gestures.h"
 extern Screen settings_body_screen;
 #define settings_body_screen_ref settings_body_screen
 extern Screen contacts_screen;
@@ -161,6 +163,13 @@ void sim_scenarios() {
         static const char *const N[10] = {"tile_activity", "tile_weather", "tile_next", "tile_music", "tile_timer",
                                           "tile_life", "tile_world", "tile_alarm", "tile_reminders", "tile_battery"};
         for (int i = 0; i < 10; i++) { tiles_set_page(i); shot(&tiles_screen, N[i]); }
+        // the Notifications tile, in each of its steps
+        static const uint8_t NT[10] = {TL_NOTIF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+        memcpy(g_app_settings.tiles, NT, sizeof(NT));
+        tiles_set_page(0);
+        notif_mode_set(NM_ICON);
+        shot(&tiles_screen, "tile_notif");
+        notif_mode_set(NM_FULL);
         tiles_set_page(0);
         memcpy(g_app_settings.tiles, keep, sizeof(keep));
     }
@@ -436,6 +445,18 @@ void sim_scenarios() {
     { extern Screen maze_screen; shot(&maze_screen, "game_maze_title");
       sim_tap(233, 300); sim_run(6000); sim_save("game_maze"); }
 
+    home();
+    // Notifications: icon only - a new message pops up as just its app
+    notif_mode_set(NM_ICON);
+    sim_link("{\"t\":\"ntf\",\"id\":31,\"ap\":\"Telegram\",\"ti\":\"Luca\",\"tx\":\"On my way\",\"rp\":1}");
+    sim_run(400);
+    sim_save("notif_icon_only");
+    ui_top_panel_open();
+    sim_run(1500);
+    sim_save("quick_panel_icon_only");
+    ui_top_panel_close();
+    sim_run(800);
+    notif_mode_set(NM_FULL);
     home();
     ui_top_panel_open();
     sim_run(1500);

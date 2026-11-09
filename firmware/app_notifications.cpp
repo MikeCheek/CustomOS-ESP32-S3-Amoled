@@ -148,10 +148,14 @@ static void toast_for(const NotifHistoryItem &it, bool quiet) {
     usage_count_notification();
     if (quiet || dnd_active() || notifications_app_muted(it.source)) return;
     haptic(HAP_NOTIFY);
+    if (it.icon) phone_icon(it.icon);   // ask now, so it's likely there by the next frame
+    if (notif_mode() == NM_ICON) {      // just the app's icon (Settings, the control panel...)
+        ui_show_toast_badge(it.icon, it.source, 2500);
+        return;
+    }
     char t[96];
     if (it.title[0]) snprintf(t, sizeof(t), "%s: %s", it.title, it.text);
     else snprintf(t, sizeof(t), "%s", it.text);
-    if (it.icon) phone_icon(it.icon);   // ask now, so it's likely there by the next frame
     ui_show_toast_icon(t, 3500, it.icon);
 }
 
