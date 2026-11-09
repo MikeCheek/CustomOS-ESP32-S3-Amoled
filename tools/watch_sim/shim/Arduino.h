@@ -48,6 +48,8 @@ static inline long map(long x, long a, long b, long c, long d) { return (x - a) 
 #endif
 
 uint32_t millis();
+inline uint32_t getCpuFrequencyMhz() { return 240; }
+inline uint32_t getApbFrequency() { return 80000000; }
 uint32_t micros();
 void delay(uint32_t ms);
 void delayMicroseconds(uint32_t us);

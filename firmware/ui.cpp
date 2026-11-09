@@ -1071,9 +1071,11 @@ void ui_update() {
 
     static uint32_t s_last_base_log = 0;
     if (t2 - s_last_base_log > 5000) {
-        DEBUG_PRINTF("[perf] draw=%lums rot=%lums handoff=%lums angle=%d\n",
+        // cpu/apb: what the clocks are right now (power management can lower them while calm)
+        DEBUG_PRINTF("[perf] draw=%lums rot=%lums handoff=%lums angle=%d cpu=%luMHz apb=%luMHz calm=%d\n",
                      (unsigned long)(t0 - t_draw0), (unsigned long)(t1 - t0),
-                     (unsigned long)(t2 - t1), s_rot_angle);
+                     (unsigned long)(t2 - t1), s_rot_angle, (unsigned long)getCpuFrequencyMhz(),
+                     (unsigned long)(getApbFrequency() / 1000000), s_calm ? 1 : 0);
         s_last_base_log = t2;
     }
 }
