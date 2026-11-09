@@ -127,6 +127,21 @@ jobs:
           fw=$(grep -oP '#define FW_VERSION "\K[^"]+' firmware/diag.h)
           cp .pio/build/watch/firmware.bin "AmoledSmartWatchOS-$fw.bin"
 
+      # The whole flash in one file, written at 0x0 over USB: the bootloader,
+      # the partition table (6 MB slots since 3.5 - the firmware .bin alone
+      # can't change it), a blank otadata (so app0 boots) and the firmware.
+      # For a first USB flash, or a watch on the old table (README, Building).
+      - name: Full image (bootloader + partition table + firmware)
+        run: |
+          fw=$(grep -oP '#define FW_VERSION "\K[^"]+' firmware/diag.h)
+          b=.pio/build/watch
+          test -f "$b/partitions.bin" || python3 tools/partitions_bin.py firmware/partitions.csv "$b/partitions.bin"
+          python3 -c "open('otadata_blank.bin','wb').write(b'\xff' * 0x2000)"
+          pip install "esptool==4.8.1"
+          python3 -m esptool --chip esp32s3 merge_bin -o "AmoledSmartWatchOS-$fw-full.bin" \
+            0x0 "$b/bootloader.bin" 0x8000 "$b/partitions.bin" 0xe000 otadata_blank.bin 0x10000 "$b/firmware.bin"
+          ls -l AmoledSmartWatchOS-*.bin
+
       - name: On failure, show what the libs package holds for TinyUSB
         if: failure()
         run: |
