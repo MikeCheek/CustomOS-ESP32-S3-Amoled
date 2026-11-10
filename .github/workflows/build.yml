@@ -177,7 +177,7 @@ jobs:
           SZ=$(ls ~/.platformio/packages/toolchain-xtensa-esp-elf/bin/*-size | head -1)
           "$SZ" -A .pio/build/watch/firmware.elf | grep -E 'dram0|iram0|ext_ram' || true
           echo "biggest static data in internal RAM:"
-          "$NM" -S --size-sort -C .pio/build/watch/firmware.elf | awk '$3 ~ /^[bBdD]$/ { a = strtonum("0x" $1); if (a >= 0x3fc88000 && a < 0x3fd00000) print }' | tail -45 || true
+          "$NM" -S --size-sort -C .pio/build/watch/firmware.elf | awk '$3 ~ /^[bBdD]$/ { if ($1 >= "3fc88000" && $1 < "3fd00000") print }' | tail -45 || true
           # The settings that make the chip fast (platformio.ini): what the build really used
           SDK=$(ls sdkconfig.watch .pio/build/watch/sdkconfig 2>/dev/null | head -1)
           echo "speed settings ($SDK):"
