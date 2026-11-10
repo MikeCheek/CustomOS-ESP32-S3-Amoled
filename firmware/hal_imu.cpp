@@ -60,11 +60,13 @@ bool imu_init() {
     // 62.5 Hz accelerometer only: enough for tilt controls and wrist
     // wake, what the on-chip pedometer is tuned for, and a fraction of
     // the power of the old 250 Hz accel + 224 Hz gyro (nothing used the
-    // gyro).
+    // gyro). Low-pass at 13.37% of the rate (~8 Hz): smooths the jitter but
+    // keeps a flick's or a fall's short spike - mode 0 (2.66%, ~1.7 Hz)
+    // flattened those below what the detectors look for.
     s_imu.configAccelerometer(
         SensorQMI8658::ACC_RANGE_4G,
         SensorQMI8658::ACC_ODR_62_5Hz,
-        SensorQMI8658::LPF_MODE_0);
+        SensorQMI8658::LPF_MODE_3);
     s_imu.enableAccelerometer();
 
     // Pedometer windows are in samples at 62.5 Hz: 0.8 s batch, a step
@@ -90,11 +92,21 @@ bool imu_init() {
     return true;
 }
 
+static volatile bool s_sampling = false;   // the sampler task below is running
+
 ImuSample imu_read() {
     ImuSample s{};
     if (!s_ok) { s.valid = false; return s; }
 
     ImuLock lock;
+    // While the sampler runs, it reads every sample (62.5 Hz) and keeps the
+    // latest here: its reads also clear the chip's data-ready flag, so
+    // waiting for that below would find none (raise to wake saw no motion).
+    if (s_sampling) {
+        if (s_last.valid && millis() - s_last_ms < 100) return s_last;
+        s.valid = false;
+        return s;
+    }
     if (s_imu.getDataReady()) {
         s_imu.getAccelerometer(s.ax, s.ay, s.az);
         s.temperature_c = s_last.temperature_c;
@@ -119,7 +131,6 @@ static float s_ring[RING * 3];
 static volatile uint16_t s_head = 0, s_tail = 0;   // written by the task / by the reader
 static portMUX_TYPE s_ring_mux = portMUX_INITIALIZER_UNLOCKED;
 static TaskHandle_t s_sampler = nullptr;
-static volatile bool s_sampling = false;
 
 static void sampler_task(void *) {
     TickType_t next = xTaskGetTickCount();
@@ -134,6 +145,13 @@ static void sampler_task(void *) {
         {
             ImuLock lock;
             ok = s_imu.getAccelerometer(x, y, z);
+            if (ok) {   // the latest, for imu_read()
+                s_last.ax = x;
+                s_last.ay = y;
+                s_last.az = z;
+                s_last.valid = true;
+                s_last_ms = millis();
+            }
         }
         if (ok) {
             portENTER_CRITICAL(&s_ring_mux);
