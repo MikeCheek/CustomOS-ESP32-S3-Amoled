@@ -36,6 +36,13 @@ static uint32_t s_last_step_ms = 0;
 static ImuSample s_last;               // last real sample
 static uint32_t s_last_ms = 0;
 
+// One reader at a time: the main loop (imu_read) and the sampler task below
+static SemaphoreHandle_t s_lock = nullptr;
+struct ImuLock {
+    ImuLock() { if (s_lock) xSemaphoreTake(s_lock, portMAX_DELAY); }
+    ~ImuLock() { if (s_lock) xSemaphoreGive(s_lock); }
+};
+
 static uint32_t today() {
     WatchTime t = rtc_now();
     if (t.year < 2024) return 0;
@@ -82,13 +89,6 @@ bool imu_init() {
 #endif
     return true;
 }
-
-// One reader at a time: the main loop (imu_read) and the sampler task below
-static SemaphoreHandle_t s_lock = nullptr;
-struct ImuLock {
-    ImuLock() { if (s_lock) xSemaphoreTake(s_lock, portMAX_DELAY); }
-    ~ImuLock() { if (s_lock) xSemaphoreGive(s_lock); }
-};
 
 ImuSample imu_read() {
     ImuSample s{};
@@ -161,7 +161,8 @@ bool imu_fifo_enable(bool on) {
         }
     }
     portENTER_CRITICAL(&s_ring_mux);
-    s_head = s_tail = 0;
+    s_head = 0;
+    s_tail = 0;
     portEXIT_CRITICAL(&s_ring_mux);
     s_sampling = on;
     if (on && s_sampler) xTaskNotifyGive(s_sampler);
