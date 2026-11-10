@@ -67,18 +67,44 @@ class WakeWords {
     }
     final total = data.values.fold<int>(0, (a, b) => a + b.length);
     var done = 0;
+    var confirms = true; // firmware that says when each file is saved (3.5+)
     for (final f in files) {
       final bytes = data[f]!;
-      await ble.sendFileWithProgress(
-        'wn:${w.dir}/$f',
-        bytes,
-        onProgress: (sent) {
-          onProgress?.call(0.15 + 0.85 * (done + sent) / total);
-        },
-      );
+      final name = '${w.dir}/$f';
+      for (var attempt = 0; ; attempt++) {
+        // listening before it's sent: the watch may answer quickly
+        final saved = confirms
+            ? ble.linkEvents
+                  .firstWhere((e) => e['e'] == 'wnf' && e['f'] == name)
+                  .timeout(Duration(seconds: bytes.length > 1000000 ? 40 : 20), onTimeout: () => const {})
+            : null;
+        await ble.sendFileWithProgress(
+          'wn:$name',
+          bytes,
+          onProgress: (sent) {
+            onProgress?.call(0.15 + 0.85 * (done + sent) / total);
+          },
+        );
+        if (saved == null) {
+          // The watch saves one file at a time: let it write this one first.
+          await Future.delayed(Duration(milliseconds: bytes.length > 1000000 ? 4000 : 1500));
+          break;
+        }
+        final r = await saved;
+        if (r.isEmpty) {
+          // no answer: older firmware - the old pause from here on
+          confirms = false;
+          await Future.delayed(const Duration(milliseconds: 1500));
+          break;
+        }
+        if (r['ok'] == 1) {
+          if (r['inst'] == 0) throw Exception('the watch has an incomplete copy - try again');
+          break;
+        }
+        if (attempt >= 1) throw Exception("the watch couldn't save $f (is the SD card in?)");
+        await Future.delayed(const Duration(seconds: 1)); // once more
+      }
       done += bytes.length;
-      // The watch saves one file at a time: let it write this one first.
-      await Future.delayed(Duration(milliseconds: bytes.length > 1000000 ? 4000 : 1500));
     }
     onProgress?.call(1);
   }

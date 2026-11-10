@@ -63,3 +63,5 @@ const char *voice_commands_status();  // one line for Settings
 // A "wn:<model>/<file>" Bluetooth transfer (name without the "wn:").
 // Saves it in /srmodels; true when it's written.
 bool voice_model_file(const char *name, const uint8_t *data, int len);
+// The model in /srmodels/<dir> has all its files (and so is listed).
+bool voice_model_installed(const char *dir);

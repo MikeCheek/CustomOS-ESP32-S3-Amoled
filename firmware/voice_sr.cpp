@@ -800,6 +800,14 @@ bool voice_model_file(const char *name, const uint8_t *data, int len) {
     return true;
 }
 
+bool voice_model_installed(const char *dir) {
+    scan_models();
+    if (!strncmp(dir, "mn7", 3)) return !strcmp(s_mn_dir, dir);
+    for (int i = 0; i < s_model_n; i++)
+        if (!strcmp(s_models[i].dir, dir)) return true;
+    return false;
+}
+
 #else // no ESP-SR in this build -------------------------------------------------------
 
 void voice_init() {}
@@ -811,6 +819,7 @@ int voice_wake_model_count() { return 0; }
 void voice_wake_next_model() {}
 bool voice_wake_keeps_awake() { return false; }
 bool voice_model_file(const char *, const uint8_t *, int) { return false; }
+bool voice_model_installed(const char *) { return false; }
 bool voice_commands_installed() { return false; }
 bool voice_offline_command() { return false; }
 bool voice_offline_listening() { return false; }

@@ -113,20 +113,38 @@ static void check_file_transfer() {
     BleFileState st = ble_file_state();
 
     // A wake word model the app is installing (Settings > Sound > Voice):
-    // three files into /srmodels, no question each time.
+    // three files into /srmodels, no question each time. Each one is
+    // confirmed to the app ({"e":"wnf"}), which waits for that before it
+    // sends the next - a file sent while the last was still being saved
+    // was lost, and the word then never showed up as installed.
     bool wake_model = !strncmp(ble_file_name(), "wn:", 3);
     if (st == BLE_FILE_PENDING && wake_model) {
         ble_file_approve();
         return;
     }
     if (st == BLE_FILE_COMPLETE && wake_model) {
-        const char *n = ble_file_name() + 3;
+        char n[64];
+        strlcpy(n, ble_file_name() + 3, sizeof(n));
+        for (char *p = n; *p; p++)
+            if (*p == '"' || *p == '\\' || (uint8_t)*p < 0x20) *p = '_';   // goes back in JSON
         bool ok = voice_model_file(n, ble_file_data(), ble_file_bytes_received());
         bool cmds = !strncmp(n, "mn7", 3);
-        if (!ok) ui_show_toast(cmds ? "Couldn't save the voice commands" : "Couldn't save the wake word", 2000);
-        else if (strstr(n, "/_MODEL_INFO_"))   // the app sends it last
-            ui_show_toast(cmds ? "Voice commands installed" : "Wake word installed", 2000);
+        bool last = strstr(n, "/_MODEL_INFO_") != nullptr;   // the app sends it last
+        bool inst = false;
+        if (ok && last) {
+            char dir[32];
+            strlcpy(dir, n, sizeof(dir));
+            if (char *sl = strchr(dir, '/')) *sl = 0;
+            inst = voice_model_installed(dir);
+        }
         ble_consume_file();
+        char j[112];
+        snprintf(j, sizeof(j), "{\"e\":\"wnf\",\"f\":\"%s\",\"ok\":%d%s}", n, ok ? 1 : 0,
+                 last ? (inst ? ",\"inst\":1" : ",\"inst\":0") : "");
+        ble_link_send(j);
+        if (!ok) ui_show_toast(cmds ? "Couldn't save the voice commands" : "Couldn't save the wake word", 2000);
+        else if (last && inst) ui_show_toast(cmds ? "Voice commands installed" : "Wake word installed", 2000);
+        else if (last) ui_show_toast(cmds ? "Voice commands incomplete - install them again" : "Wake word incomplete - install it again", 3000);
         return;
     }
 
@@ -880,6 +898,9 @@ void loop() {
         PROF(phone_link_update());
         PROF(phone_images_update());      // decode an icon / cover that arrived
         PROF(check_notes_sync());
+        // a wake word installing: saved with the screen off too (only that -
+        // other files ask first, on screen)
+        if (!strncmp(ble_file_name(), "wn:", 3)) PROF(check_file_transfer());
 #endif
 #if FEATURE_WIFI
         PROF(bambu_tick()); // internally a no-op unless enabled and WiFi is connected, same as the NTP poll above
