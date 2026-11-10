@@ -172,6 +172,12 @@ jobs:
             echo "$syms" | grep -qw "$s" || { echo "::error::$s missing - the stock core was linked, not the one built with custom_sdkconfig"; exit 1; }
           done
           echo "Power management and tickless idle linked in" >> "$GITHUB_STEP_SUMMARY"
+          # Internal RAM (DRAM 0x3fc8_8000-0x3fd0_0000) is what Bluetooth and Wi-Fi
+          # need at run time: the biggest static users, and the totals
+          SZ=$(ls ~/.platformio/packages/toolchain-xtensa-esp-elf/bin/*-size | head -1)
+          "$SZ" -A .pio/build/watch/firmware.elf | grep -E 'dram0|iram0|ext_ram' || true
+          echo "biggest static data in internal RAM:"
+          "$NM" -S --size-sort -C .pio/build/watch/firmware.elf | awk '$3 ~ /^[bBdD]$/ { a = strtonum("0x" $1); if (a >= 0x3fc88000 && a < 0x3fd00000) print }' | tail -45 || true
           # The settings that make the chip fast (platformio.ini): what the build really used
           SDK=$(ls sdkconfig.watch .pio/build/watch/sdkconfig 2>/dev/null | head -1)
           echo "speed settings ($SDK):"
