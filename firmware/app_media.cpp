@@ -6,6 +6,7 @@
  */
 
 #include "config.h"
+#include "psram_static.h"
 #include "board_pins.h"
 #include "ui.h"
 #include "fx3d.h"
@@ -168,7 +169,7 @@ struct BrowserEntry {
     uint32_t size;
 };
 
-static BrowserEntry s_br_entries[BROWSER_MAX_ENTRIES];
+PS_ARRAY(BrowserEntry, s_br_entries, [BROWSER_MAX_ENTRIES]);
 static int          s_br_count = 0;
 static int          s_br_scroll = 0;
 static bool         s_br_dragging = false;
@@ -177,7 +178,7 @@ static int          s_br_drag_scroll = 0;
 
 // Path stack for back navigation
 #define BR_MAX_DEPTH 8
-static char s_br_path_stack[BR_MAX_DEPTH][BROWSER_MAX_PATH];
+PS_ARRAY(char, s_br_path_stack, [BR_MAX_DEPTH][BROWSER_MAX_PATH]);
 static int  s_br_path_depth = 0;
 static char s_br_cur_path[BROWSER_MAX_PATH] = "/";
 

@@ -1,5 +1,6 @@
 // Life: habits, nudges, Breathe and Stretch - see app_life.h.
 #include "app_life.h"
+#include "psram_static.h"
 #include "store.h"
 #include "config.h"
 #include "board_pins.h"
@@ -47,7 +48,7 @@ static LifeDay s_today = {};
 // The days before today, newest first: 90 in the store (store.h), 7 in NVS
 // when there's nowhere else.
 static const int HIST_MAX = 90;
-static LifeDay s_hist[HIST_MAX];
+PS_ARRAY(LifeDay, s_hist, [HIST_MAX]);
 static int s_hist_n = 0;
 static bool s_hist_dirty = false;
 static int hist_cap() { return store_ok() ? HIST_MAX : 7; }
@@ -420,7 +421,8 @@ static void habit_value(int h, char *b, int n) {
 //  The Life app: the score and today's habits
 // =========================================================================
 static UiScroll s_scroll;
-static int s_rows[H_COUNT], s_row_n = 0;
+PS_ARRAY(int, s_rows, [H_COUNT]);
+static int s_row_n = 0;
 static const int ROW = 84, TOP = 250;
 extern Screen life_meal_screen;
 

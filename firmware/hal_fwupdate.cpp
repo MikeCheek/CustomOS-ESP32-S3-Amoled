@@ -32,6 +32,13 @@ static const int  SIG_TRAILER = 64 + 8;
 static const uint32_t CONNECT_TIMEOUT_MS = 20000;
 static const uint32_t STALL_TIMEOUT_MS = 20000;
 static const uint32_t FIRST_AUTO_CHECK_MS = 30000;   // let boot (and the NTP sync) settle first
+// An automatic check that couldn't run (no memory: Bluetooth starting at
+// the same moment, say) is tried again this soon - a few times - instead
+// of a day later.
+static const uint32_t AUTO_RETRY_MS = 10UL * 60UL * 1000UL;
+static const int AUTO_RETRIES = 3;
+static int s_auto_retries = 0;
+static void auto_retry_soon();
 
 enum Job : uint8_t { JOB_NONE, JOB_CHECK, JOB_DOWNLOAD };
 
@@ -284,6 +291,7 @@ static void worker(void *arg) {
 
 static void fail_now(const char *why) {
     set_error(why);
+    if (s_job == JOB_CHECK && !s_manual) auto_retry_soon();
     s_failed_installing = s_job == JOB_DOWNLOAD;
     // An automatic check that fails stays quiet (it's tried again later).
     s_state = (s_job == JOB_CHECK && !s_manual) ? FWUP_IDLE : FWUP_FAILED;
@@ -344,6 +352,20 @@ static void on_prompt(bool yes) {
     fwup_install();
 }
 
+static void auto_retry_soon() {
+    if (s_auto_retries >= AUTO_RETRIES) return;   // the next daily check, then
+    s_auto_retries++;
+    s_last_auto_ms = millis() - ((uint32_t)FW_UPDATE_CHECK_HOURS * 3600UL * 1000UL - AUTO_RETRY_MS);
+    DEBUG_PRINTF("[fwup] automatic check again in 10 min\n");
+}
+
+// Internal RAM the check needs: the worker's 12 KB stack (flash writes need
+// it internal), and Wi-Fi's own if it isn't up yet.
+static bool auto_memory_ok() {
+    size_t need = wifi_is_connected() ? 16 * 1024 : 48 * 1024;
+    return heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL) >= need;
+}
+
 static bool auto_check_due() {
     uint32_t now = millis();
     if (!s_auto_done_once) return now > FIRST_AUTO_CHECK_MS;
@@ -364,7 +386,7 @@ void fwup_update() {
         int bat = power_get_battery_percent();
         bool battery_ok = power_is_charging() || bat < 0 || bat >= 20;
         if (battery_ok && wifi_has_credentials() && (wifi_is_connected() || g_app_settings.wifi_on) &&
-            !wifi_xfer_active() && !ota_active()) {
+            !wifi_xfer_active() && !ota_active() && auto_memory_ok()) {   // short on RAM: looked at again in 5 s
             s_auto_done_once = true;
             s_last_auto_ms = millis();
             DEBUG_PRINTF("[fwup] automatic check\n");
@@ -381,7 +403,7 @@ void fwup_update() {
             // internal RAM. Core 0, away from the UI loop.
             if (xTaskCreatePinnedToCore(worker, "fwup", 12 * 1024, (void *)(uintptr_t)s_job, 1, nullptr, 0) != pdPASS) {
                 s_task_running = false;
-                fail_now("Not enough memory");
+                fail_now("Not enough memory - try again in a minute");
             }
         } else if (millis() - s_connect_ms > CONNECT_TIMEOUT_MS) {
             fail_now("Couldn't connect to Wi-Fi");
@@ -400,6 +422,8 @@ void fwup_update() {
         if (job == JOB_CHECK && !s_manual) {
             if (st == FWUP_AVAILABLE) s_prompt_pending = true;
             else if (st == FWUP_FAILED || st == FWUP_UP_TO_DATE) s_state = FWUP_IDLE;   // quiet
+            if (st == FWUP_FAILED) auto_retry_soon();
+            else s_auto_retries = 0;
         }
     }
 

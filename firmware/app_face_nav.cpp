@@ -1,5 +1,6 @@
 // The Smart Stack and the face switcher - see app_face_nav.h.
 #include "app_face_nav.h"
+#include "psram_static.h"
 #include "config.h"
 #include "board_pins.h"
 #include "ui_font.h"
@@ -83,7 +84,7 @@ struct Card {
     float progress;        // < 0: no bar
 };
 
-static Card s_cards[16];
+PS_ARRAY(Card, s_cards, [16]);
 static int  s_card_n = 0;
 static float s_scroll = 0, s_scroll_vel = 0;
 static bool  s_st_drag = false, s_st_moved = false;

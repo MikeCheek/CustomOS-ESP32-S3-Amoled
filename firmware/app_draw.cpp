@@ -3,6 +3,7 @@
  * opens (stroke_recog.h). Tools > Draw.
  */
 #include "stroke_recog.h"
+#include "psram_static.h"
 #include "config.h"
 #include "board_pins.h"
 #include "ui.h"
@@ -26,7 +27,7 @@ static const Target TARGETS[] = {
     {'V', "Voice recorder", &recorder_screen}, {'Z', "Sleep", &sleep_screen},
 };
 
-static StrokePt s_pts[MAXP];
+PS_ARRAY(StrokePt, s_pts, [MAXP]);
 static int s_n = 0;
 static bool s_down = false;
 static char s_msg[40] = "";

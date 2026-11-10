@@ -1,4 +1,5 @@
 #include "app_activity.h"
+#include "psram_static.h"
 #include "app_fall.h"
 #include "motion_detect.h"
 #include "fitness.h"
@@ -41,7 +42,7 @@ void motion_update() {
         for (auto &x : s_secs) x = 0;
     }
     bool awake = !sleep_is_asleep();
-    static float xyz[128 * 3];
+    PS_ARRAY(float, xyz, [128 * 3]);
     int n = imu_fifo_read(xyz, 128);
     for (int i = 0; i < n; i++) {
         float x = xyz[i * 3], y = xyz[i * 3 + 1], z = xyz[i * 3 + 2];

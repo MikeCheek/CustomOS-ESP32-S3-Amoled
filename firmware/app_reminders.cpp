@@ -1,5 +1,6 @@
 // Reminders - see app_reminders.h.
 #include "haptics.h"
+#include "psram_static.h"
 #include "app_reminders.h"
 #include "config.h"
 #include "board_pins.h"
@@ -15,9 +16,9 @@
 static const int CX = LCD_WIDTH / 2;
 static const int MAX_ITEMS = 24;
 struct Item { char k[40]; char x[80]; };
-static Item s_items[MAX_ITEMS];
+PS_ARRAY(Item, s_items, [MAX_ITEMS]);
 static int  s_n = 0;
-static Item s_stage[MAX_ITEMS];   // pages arriving
+PS_ARRAY(Item, s_stage, [MAX_ITEMS]);   // pages arriving
 static int  s_stage_n = 0;
 // Ticked here but not yet gone from the phone's list (it was away): sent
 // again whenever a list comes, and kept out of it until the phone agrees.

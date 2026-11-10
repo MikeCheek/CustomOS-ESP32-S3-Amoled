@@ -1,4 +1,5 @@
 #include "app_notifications.h"
+#include "psram_static.h"
 #include "store.h"
 #include "dnd.h"
 #include "config.h"
@@ -400,7 +401,7 @@ static int list_top() {
 // (tap to fan them out), each row swipes left to clear, "Clear all" ends it.
 enum RowKind : uint8_t { R_ITEM, R_STACK, R_HEADER, R_CLEAR };
 struct Row { RowKind kind; int8_t idx; uint8_t n; int16_t y, h; };
-static Row  s_rows[NOTIF_HISTORY_SIZE * 2 + 2];
+PS_ARRAY(Row, s_rows, [NOTIF_HISTORY_SIZE * 2 + 2]);
 static int  s_row_n = 0;
 static char s_expanded[32] = "";   // the app fanned out
 static int  s_swipe_row = -1;      // the row following the finger sideways

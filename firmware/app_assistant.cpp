@@ -3,6 +3,7 @@
  * Voice assistant - see app_assistant.h.
  */
 #include "app_assistant.h"
+#include "psram_static.h"
 #include "config.h"
 #include "board_pins.h"
 #include "ui.h"
@@ -67,7 +68,7 @@ static uint32_t s_expect_until = 0;
 // The last answers, newest first, for the history (swipe up on an answer).
 #define HIST_N 6
 struct AskHist { char q[100]; char a[200]; };
-static AskHist s_hist[HIST_N];
+PS_ARRAY(AskHist, s_hist, [HIST_N]);
 static int s_hist_n = 0;
 
 static void hist_add(const char *q, const char *a) {

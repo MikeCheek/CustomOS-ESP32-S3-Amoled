@@ -30,6 +30,7 @@
  * Physics runs in fixed 16 ms steps (see game_plane.cpp).
  */
 #include "game_maze.h"
+#include "psram_static.h"
 #include "config.h"
 #include "board_pins.h"
 #include "game_audio.h"
@@ -112,7 +113,7 @@ static int s_health, s_score, s_level, s_best;
 static int s_gems_left, s_gems_total;
 static bool s_portal_open;
 static Enemy s_enemies[MAX_ENEMIES];
-static Item s_items[MAX_ITEMS];
+PS_ARRAY(Item, s_items, [MAX_ITEMS]);
 static Bullet s_bullets[MAX_BULLETS];
 static float s_zbuf[NUM_RAYS + 1];
 static uint32_t s_last_fire_ms, s_last_phys_step, s_state_enter_ms, s_last_path_ms, s_hurt_ms, s_level_start_ms;

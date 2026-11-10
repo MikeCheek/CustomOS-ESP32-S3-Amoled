@@ -30,6 +30,7 @@
  *    deciding how busy a real dungeon room's rendering could be.
  */
 #include "app_sprite_test.h"
+#include "psram_static.h"
 #include "config.h"
 #include "board_pins.h"
 #include <Arduino_GFX_Library.h>
@@ -48,7 +49,7 @@ static int s_count_idx = 1; // start at 30
 
 #define MAX_SPRITES 100
 struct TestSprite { float x, y, vx, vy; };
-static TestSprite s_sprites[MAX_SPRITES];
+PS_ARRAY(TestSprite, s_sprites, [MAX_SPRITES]);
 
 static uint32_t s_last_tick_ms;
 static int s_frame_count;

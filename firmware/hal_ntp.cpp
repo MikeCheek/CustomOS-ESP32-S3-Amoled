@@ -59,7 +59,7 @@ void ntp_update() {
         }
     } else if (s_status == NTP_SYNCING) {
         struct tm t;
-        if (getLocalTime(&t, 100) && t.tm_year > (2024 - 1900)) {
+        if (getLocalTime(&t, 0) && t.tm_year > (2024 - 1900)) {   // 0: a look, not a wait - the loop comes back every frame
             rtc_set(t.tm_year + 1900, t.tm_mon + 1, t.tm_mday,
                     t.tm_hour, t.tm_min, t.tm_sec);
             s_status = NTP_DONE;

@@ -1,4 +1,5 @@
 #include "ui.h"
+#include "psram_static.h"
 #include "app_face_nav.h"
 #include "hal_rtc.h"
 #include "clock_fmt.h"
@@ -224,8 +225,8 @@ bool ui_is_on_circle(int x, int y) {
 // ---- Auto-rotate -----------------------------------------------------------
 // Precomputed circle row bounds: for each row, the leftmost and rightmost
 // pixel inside the circle. Avoids per-pixel circle test.
-static int s_circ_left[LCD_HEIGHT];
-static int s_circ_right[LCD_HEIGHT];
+PS_ARRAY(int, s_circ_left, [LCD_HEIGHT]);
+PS_ARRAY(int, s_circ_right, [LCD_HEIGHT]);
 
 static void init_circle_bounds() {
     int half = LCD_WIDTH / 2;

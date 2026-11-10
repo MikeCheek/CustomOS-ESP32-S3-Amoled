@@ -1,5 +1,6 @@
 // Workout app - see app_workout.h.
 #include "haptics.h"
+#include "psram_static.h"
 #include "app_workout.h"
 #include "store.h"
 #include "config.h"
@@ -74,7 +75,7 @@ struct WoRecord {
 };
 // oldest first: 100 in the store (store.h), the last 20 in NVS when there's nowhere else
 static const int MAX_REC = 100, NVS_REC = 20;
-static WoRecord s_rec[MAX_REC];
+PS_ARRAY(WoRecord, s_rec, [MAX_REC]);
 static int s_rec_n = 0;
 
 static void save_records() {

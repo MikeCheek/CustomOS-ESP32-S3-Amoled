@@ -1,5 +1,6 @@
 // Wallet - see app_wallet.h.
 #include "app_wallet.h"
+#include "psram_static.h"
 #include "config.h"
 #include "board_pins.h"
 #include "ui_font.h"
@@ -30,7 +31,7 @@ struct Pass {
     uint32_t crc;
     uint8_t *bits;      // PSRAM, row by row, MSB first; nullptr = empty slot
 };
-static Pass s_pass[WALLET_MAX];
+PS_ARRAY(Pass, s_pass, [WALLET_MAX]);
 
 // ---- storage ------------------------------------------------------------------------------
 // In the store (store.h: the SD card, else the watch's flash) as

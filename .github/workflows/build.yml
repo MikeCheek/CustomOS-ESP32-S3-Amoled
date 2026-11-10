@@ -287,6 +287,9 @@ jobs:
           if [ "$size" -gt 6291456 ]; then echo "::error::firmware.ino.bin ($size bytes) doesn't fit the 6 MB app slot"; exit 1; fi
           fw=$(grep -oP '#define FW_VERSION "\K[^"]+' firmware/diag.h)
           cp build/firmware.ino.bin "AmoledSmartWatchOS-$fw-arduino.bin"
+          # Internal RAM taken by static data (Bluetooth and Wi-Fi need what's left)
+          SZ=$(find ~/.arduino15/packages/esp32/tools -name 'xtensa-esp*-elf-size' -type f | head -1)
+          [ -n "$SZ" ] && "$SZ" -A build/firmware.ino.elf | grep -E 'dram0\.(data|bss)' | tee -a "$GITHUB_STEP_SUMMARY" || true
 
       - name: Emulator on the PC, with self-tests (store, Wallet, home gestures)
         run: |
