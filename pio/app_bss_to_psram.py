@@ -65,10 +65,10 @@ def move_bss(target, source, env):
     objcopy, objdump = cc[:-3] + "objcopy", cc[:-3] + "objdump"
     tool_env = dict(os.environ)
     tool_env.update(env["ENV"])
-    src_dir = os.path.normpath(env.subst("$BUILD_DIR/src"))
+    src_dir = os.path.abspath(env.subst("$BUILD_DIR/src"))
     files = moved = total = 0
     for node in source:
-        path = os.path.normpath(str(node))
+        path = os.path.abspath(node.get_abspath() if hasattr(node, "get_abspath") else str(node))
         if not path.endswith(".o") or not path.startswith(src_dir + os.sep):
             continue
         name = os.path.basename(path)[:-2]     # "app_menu.cpp"
@@ -89,6 +89,8 @@ def move_bss(target, source, env):
             moved += len(secs)
         except Exception as e:  # never break the build over this: that file stays internal
             _log("%s left in internal RAM (%s)" % (name, e))
+    if not files and not any(os.path.abspath(str(n)).startswith(src_dir + os.sep) for n in source):
+        _log("no firmware objects among the link's %d inputs (e.g. %s)" % (len(source), source[0] if source else "-"))
     _log("%d sections from %d files moved to PSRAM (%d bytes)" % (moved, files, total))
 
 
