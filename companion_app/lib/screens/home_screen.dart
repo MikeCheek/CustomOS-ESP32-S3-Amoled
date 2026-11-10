@@ -655,7 +655,8 @@ class _MemoBrief extends ConsumerWidget {
     final kb = ref.watch(knowledgeProvider);
     final done = ref.watch(doneActionsProvider);
     final notes = ref.watch(notesProvider);
-    if (kb.isEmpty) return const SizedBox.shrink();
+    final todos = ref.watch(todosProvider).where((a) => !done.contains(a.key)).toList();
+    if (kb.isEmpty && todos.isEmpty) return const SizedBox.shrink();
 
     final now = DateTime.now();
     final urgent =
@@ -671,7 +672,6 @@ class _MemoBrief extends ConsumerWidget {
             final c = b.importance.compareTo(a.importance);
             return c != 0 ? c : (b.recordedAt ?? DateTime(2000)).compareTo(a.recordedAt ?? DateTime(2000));
           });
-    final todos = kb.actions().where((a) => !done.contains(a.key)).toList();
     final pending = notes.recordings
         .where((r) => r.transcript.isEmpty && !r.noSpeech && !r.name.toLowerCase().endsWith('.mp3'))
         .length;

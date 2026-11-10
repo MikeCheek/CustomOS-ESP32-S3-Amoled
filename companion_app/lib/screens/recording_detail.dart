@@ -300,7 +300,16 @@ class _RecordingDetailState extends ConsumerState<RecordingDetail> {
             const SectionLabel('To-dos'),
             Panel(
               padding: const EdgeInsets.symmetric(vertical: 6),
-              child: Column(children: [for (final a in e.actions) ActionRow(ActionItem(e, a), showMemo: false)]),
+              child: Column(
+                children: [
+                  for (final a in applyTodoEdits(
+                    [for (final a in e.actions) ActionItem(e, a)],
+                    ref.watch(todoEditsProvider),
+                    withManual: false,
+                  ))
+                    ActionRow(a, showMemo: false),
+                ],
+              ),
             ),
           ],
           if (e.people.isNotEmpty) ...[

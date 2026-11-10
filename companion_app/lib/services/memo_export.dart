@@ -87,6 +87,13 @@ class MemoExport {
 
   static Future<void> shareTodos(List<RecordingEntry> memos) => _shareText('To_do.md', todos(memos), 'To do');
 
+  /// A to-do list as shown (text, done), as a Markdown checklist.
+  static Future<void> shareTodoList(List<(String, bool)> items) => _shareText(
+    'To_do.md',
+    '# To do\n\n${[for (final (t, d) in items) '- [${d ? 'x' : ' '}] $t'].join('\n')}\n',
+    'To do',
+  );
+
   /// The recording itself (WAV or MP3), from the phone's copy.
   static Future<bool> shareAudio(RecordingEntry e, String path) async {
     if (!await File(path).exists()) return false;

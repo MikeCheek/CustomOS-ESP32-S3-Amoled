@@ -75,7 +75,7 @@ Built on Arduino + Arduino_GFX, no LVGL.
 | ![](docs/screenshots/timer_running.png) | ![](docs/screenshots/stopwatch.png) | ![](docs/screenshots/alarms.png) | ![](docs/screenshots/world_clock.png) |
 | Timer | Stopwatch with laps | Alarms | World clock |
 | ![](docs/screenshots/weather.png) | ![](docs/screenshots/reminders.png) | ![](docs/screenshots/workout_types.png) | |
-| Weather | Reminders (memo to-dos) | Workout types | |
+| Weather | Reminders (to-dos) | Workout types | |
 | ![](docs/screenshots/notifications_grouped.png) | ![](docs/screenshots/notifications_swipe.png) | ![](docs/screenshots/power_sos.png) | ![](docs/screenshots/sos_countdown.png) |
 | Notifications stacked by app | Swipe left to clear | Hold PWR: power off or SOS | Emergency SOS |
 | ![](docs/screenshots/life.png) | ![](docs/screenshots/life_meals.png) | ![](docs/screenshots/breathe.png) | ![](docs/screenshots/stretch.png) |
@@ -278,6 +278,8 @@ You can play by touch, by tilt, with the phone as a gamepad, or with an ESP-NOW 
 
 - Pair, reconnect automatically and keep the link alive in the background; home-screen widget.
 - Forward notifications (per app), calls, media, calendar, navigation and weather to the watch.
+- **To-dos** - add your own, reword or remove the ones found in memos, tick them off on the phone or in the
+  watch's Reminders app (Apps > To-dos).
 - **Voice memos** - sync recordings (Bluetooth or fast Wi-Fi), or record one on the spot with the phone's mic
   (it's copied to the watch too); transcribe with Whisper and summarize with Gemma / Qwen, all on the phone. Topics, to-dos, people, insights, search and "Ask AI" over your memos - also by meaning
   with an on-phone embedding model (EmbeddingGemma), so "the trip" finds "holiday in Sicily". Conversations are

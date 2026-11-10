@@ -267,6 +267,7 @@ class CompanionNotifier extends StateNotifier<CompanionState> {
     _subs.add(_native.dndChanges.listen(_onPhoneDnd, onError: (_) {}));
     _ref.listen(knowledgeProvider, (_, __) => _todosChanged());
     _ref.listen(doneActionsProvider, (_, __) => _todosChanged());
+    _ref.listen(todoEditsProvider, (_, __) => _todosChanged()); // added, edited or removed in the app
     _subs.add(_ble.batteryStream.listen((_) => _pushWidget()));
     _calendarTimer = Timer.periodic(const Duration(minutes: 15), (_) => refreshCalendar());
     _recapTimer = Timer.periodic(const Duration(minutes: 1), (_) => _maybeRecap());
@@ -378,15 +379,15 @@ class CompanionNotifier extends StateNotifier<CompanionState> {
   String _lastTodo = '';
   Timer? _todoDebounce;
 
-  /// Open to-dos from the memos: the count and first for the watch's "To-dos"
-  /// complication, and the list for its Reminders app (ticked off there:
-  /// [_onWatchTodo]).
+  /// Open to-dos (from the memos, as edited, and added by hand): the count
+  /// and first for the watch's "To-dos" complication, and the list for its
+  /// Reminders app (ticked off there: [_onWatchTodo]).
   Future<void> _sendTodos() async {
     if (!_ble.hasPhoneLink) return;
     final done = _ref.read(doneActionsProvider);
-    final open = _ref.read(knowledgeProvider).actions().where((a) => !done.contains(a.key)).toList();
+    final open = _ref.read(todosProvider).where((a) => !done.contains(a.key)).toList();
     final top = open.isEmpty ? '' : open.first.text;
-    final key = '${open.length}|${open.map((a) => a.key).join('\n')}';
+    final key = '${open.length}|${open.map((a) => '${a.key}\t${a.text}').join('\n')}'; // a reworded one is sent again
     if (key == _lastTodo) return;
     _lastTodo = key;
     await _ble.sendLink({'t': 'todo', 'n': open.length, 'top': top.length > 36 ? top.substring(0, 36) : top});
@@ -416,7 +417,7 @@ class CompanionNotifier extends StateNotifier<CompanionState> {
   /// Ticked off in the watch's Reminders app.
   Future<void> _onWatchTodo(String k) async {
     final done = _ref.read(doneActionsProvider);
-    for (final a in _ref.read(knowledgeProvider).actions()) {
+    for (final a in _ref.read(todosProvider)) {
       if (todoKey(a.key) == k && !done.contains(a.key)) {
         await _ref.read(doneActionsProvider.notifier).toggle(a.key);
         break;
@@ -453,7 +454,7 @@ class CompanionNotifier extends StateNotifier<CompanionState> {
       final events = [for (final e in state.agenda) (e.title, e.start, e.allDay)];
       final done = _ref.read(doneActionsProvider);
       final todos = [
-        for (final a in _ref.read(knowledgeProvider).actions())
+        for (final a in _ref.read(todosProvider))
           if (!done.contains(a.key)) a.text,
       ];
       final memos = [
@@ -1201,7 +1202,7 @@ class CompanionNotifier extends StateNotifier<CompanionState> {
             if (r.summary.isNotEmpty) r.summary,
         ],
         openTodos: [
-          for (final a in _ref.read(knowledgeProvider).actions())
+          for (final a in _ref.read(todosProvider))
             if (!done.contains(a.key)) a.text,
         ],
         tomorrowFirst: next.isEmpty ? null : (next.first.title, next.first.start, next.first.allDay),
