@@ -213,10 +213,7 @@ static uint16_t cpu_cap_mhz() {
 // ---- PlatformIO build: ESP-IDF power management ------------------------------------
 // platformio.ini builds the core with CONFIG_PM_ENABLE, tickless idle and
 // Bluetooth modem sleep. The policy is configured once (light sleep on,
-// an 80 MHz floor - at 40 the APB bus halves too, and with it the display's
-// SPI and everything else on the bus: every frame sent took twice as long,
-// and the first frames after a touch, still at the floor, felt slow); two
-// PM locks then say what's allowed right now:
+// 40 MHz floor); two PM locks then say what's allowed right now:
 //   - "ui" (CPU at the battery mode's maximum) while the screen is on
 //   - "awake" (no light sleep) while the screen is on, or something needs
 //     the chip: audio, GPS, a transfer, an update, a USB cable, ESP-NOW
@@ -253,12 +250,12 @@ void power_update_sleep_policy() {
     if (!s_pm_ok || want_max != s_pm_max) {
         esp_pm_config_t cfg = {};
         cfg.max_freq_mhz = want_max;
-        cfg.min_freq_mhz = 80;   // the APB bus stays at 80 MHz (see above)
+        cfg.min_freq_mhz = 40;
         cfg.light_sleep_enable = true;
         esp_err_t r = esp_pm_configure(&cfg);
         s_pm_max = want_max;
         s_pm_ok = r == ESP_OK;
-        DEBUG_PRINTF("[power] PM %lu-%u MHz, auto light sleep: %s\n", 80UL, want_max,
+        DEBUG_PRINTF("[power] PM %lu-%u MHz, auto light sleep: %s\n", 40UL, want_max,
                      s_pm_ok ? "on" : esp_err_to_name(r));
     }
     bool may_sleep = s_pm_ok && s_screen_off && g_app_settings.power_saving && !s_keep_awake &&

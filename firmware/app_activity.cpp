@@ -29,7 +29,7 @@ void motion_update() {
     if (!need) return;
     static uint32_t last_ms = 0;
     uint32_t now = millis();
-    // The FIFO holds 128 samples, ~2 s at 62.5 Hz. Awake: every 0.4 s (a
+    // The sample ring holds 128, ~2 s at 62.5 Hz. Awake: every 0.4 s (a
     // flick goes back at once). Screen off: every 1.6 s - a quarter of the
     // I2C reads and wake-ups, nothing lost, and a fall still shows within 2 s.
     uint32_t every = (sleep_is_asleep() && !s_counting) ? 1600 : 400;

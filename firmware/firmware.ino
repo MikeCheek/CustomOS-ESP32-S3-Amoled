@@ -746,33 +746,15 @@ void setup() {
 }
 
 // ---- Loop profiler ---------------------------------------------------------------------
-// Where the main loop's time goes, in the serial log every 5 s: how many
-// loops ran, the slowest one, and the slowest single call. A call that
-// takes over 100 ms is logged on its own at once.
-static uint32_t s_lp_t0 = 0, s_lp_prev_us = 0, s_lp_loops = 0, s_lp_max_loop_us = 0, s_lp_worst_us = 0;
-static const char *s_lp_worst = "-";
+// A call in the main loop that takes over 100 ms stalls the UI and touch:
+// it's named in the serial log ("[loop] motion_update() took 1001 ms").
 static void lp_note(const char *what, uint32_t us) {
-    if (us > s_lp_worst_us) { s_lp_worst_us = us; s_lp_worst = what; }
     if (us > 100000) DEBUG_PRINTF("[loop] %s took %lu ms\n", what, (unsigned long)(us / 1000));
 }
 #define PROF(...) do { uint32_t _lp = micros(); __VA_ARGS__; lp_note(#__VA_ARGS__, micros() - _lp); } while (0)
-static void loop_prof_begin() {
-    uint32_t us = micros(), ms = millis();
-    if (s_lp_prev_us && us - s_lp_prev_us > s_lp_max_loop_us) s_lp_max_loop_us = us - s_lp_prev_us;
-    s_lp_prev_us = us;
-    s_lp_loops++;
-    if (!s_lp_t0) s_lp_t0 = ms;
-    if (ms - s_lp_t0 < 5000) return;
-    DEBUG_PRINTF("[loop] %lu loops in 5 s, slowest loop %lu ms, slowest call %lu ms: %s\n", (unsigned long)s_lp_loops,
-                 (unsigned long)(s_lp_max_loop_us / 1000), (unsigned long)(s_lp_worst_us / 1000), s_lp_worst);
-    s_lp_t0 = ms;
-    s_lp_loops = s_lp_max_loop_us = s_lp_worst_us = 0;
-    s_lp_worst = "-";
-}
 
 void loop() {
     uint32_t now = millis();
-    loop_prof_begin();
 
     PROF(buttons_update());
     ButtonEvent boot_evt = buttons_get_event(BTN_BOOT);
