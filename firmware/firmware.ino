@@ -745,46 +745,73 @@ void setup() {
                  (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
 }
 
+// ---- Loop profiler ---------------------------------------------------------------------
+// Where the main loop's time goes, in the serial log every 5 s: how many
+// loops ran, the slowest one, and the slowest single call. A call that
+// takes over 100 ms is logged on its own at once.
+static uint32_t s_lp_t0 = 0, s_lp_prev_us = 0, s_lp_loops = 0, s_lp_max_loop_us = 0, s_lp_worst_us = 0;
+static const char *s_lp_worst = "-";
+static void lp_note(const char *what, uint32_t us) {
+    if (us > s_lp_worst_us) { s_lp_worst_us = us; s_lp_worst = what; }
+    if (us > 100000) DEBUG_PRINTF("[loop] %s took %lu ms\n", what, (unsigned long)(us / 1000));
+}
+#define PROF(...) do { uint32_t _lp = micros(); __VA_ARGS__; lp_note(#__VA_ARGS__, micros() - _lp); } while (0)
+static void loop_prof_begin() {
+    uint32_t us = micros(), ms = millis();
+    if (s_lp_prev_us && us - s_lp_prev_us > s_lp_max_loop_us) s_lp_max_loop_us = us - s_lp_prev_us;
+    s_lp_prev_us = us;
+    s_lp_loops++;
+    if (!s_lp_t0) s_lp_t0 = ms;
+    if (ms - s_lp_t0 < 5000) return;
+    DEBUG_PRINTF("[loop] %lu loops in 5 s, slowest loop %lu ms, slowest call %lu ms: %s\n", (unsigned long)s_lp_loops,
+                 (unsigned long)(s_lp_max_loop_us / 1000), (unsigned long)(s_lp_worst_us / 1000), s_lp_worst);
+    s_lp_t0 = ms;
+    s_lp_loops = s_lp_max_loop_us = s_lp_worst_us = 0;
+    s_lp_worst = "-";
+}
+
 void loop() {
     uint32_t now = millis();
+    loop_prof_begin();
 
-    buttons_update();
+    PROF(buttons_update());
     ButtonEvent boot_evt = buttons_get_event(BTN_BOOT);
     ButtonEvent pwr_evt = buttons_get_event(BTN_PWR);
 
     bool was_asleep = sleep_is_asleep();
 
     if (boot_evt != BTN_EVENT_NONE || pwr_evt != BTN_EVENT_NONE) {
-        sleep_register_activity();
+        PROF(sleep_register_activity());
     }
 
-    bool asleep = sleep_update();
-    diag_loop();
-    ota_update();                // firmware update from the phone (flash writes)
-    fwup_update();               // firmware update from GitHub over Wi-Fi
-    wifi_xfer_update();          // recordings over Wi-Fi, when the app asks
-    wifi_cfg_update();           // Wi-Fi setup / check from the app
-    pairing_update();            // shows the pairing code when a phone pairs
+    bool asleep;
+    PROF(asleep = sleep_update());
+    PROF(diag_loop());
+    PROF(ota_update());                // firmware update from the phone (flash writes)
+    PROF(fwup_update());               // firmware update from GitHub over Wi-Fi
+    PROF(wifi_xfer_update());          // recordings over Wi-Fi, when the app asks
+    PROF(wifi_cfg_update());           // Wi-Fi setup / check from the app
+    PROF(pairing_update());            // shows the pairing code when a phone pairs
     if (wifi_xfer_take_changes()) {
-        recordings_update_index();
-        ui_show_toast("Recording added from phone", 2000);
+        PROF(recordings_update_index());
+        PROF(ui_show_toast("Recording added from phone", 2000));
     }
     if (int nf = wifi_xfer_take_files_received()) {
         char t[40];
         snprintf(t, sizeof(t), nf == 1 ? "File received" : "%d files received", nf);
-        ui_show_toast(t, 2000);
+        PROF(ui_show_toast(t, 2000));
     }
-    imu_steps_poll();            // hardware pedometer + midnight rollover
-    calendar_update();           // event reminders (works without the phone)
-    assistant_timer_update();    // the assistant's timer rings, awake or asleep
-    clock_update();              // alarms ring, awake or asleep
-    haptics_update();            // the cue patterns, on time
-    look_update();               // the app's Faces tab follows changes made here
-    life_update();               // Life: the day's nudges
-    usage_update();              // how the watch is used (Diagnostics)
-    weather_update();            // keeps a new weather push across restarts
-    briefing_update();           // the morning briefing, once a morning
-    charge_update();             // optimized charging: 80% overnight, full by the morning
+    PROF(imu_steps_poll());            // hardware pedometer + midnight rollover
+    PROF(calendar_update());           // event reminders (works without the phone)
+    PROF(assistant_timer_update());    // the assistant's timer rings, awake or asleep
+    PROF(clock_update());              // alarms ring, awake or asleep
+    PROF(haptics_update());            // the cue patterns, on time
+    PROF(look_update());               // the app's Faces tab follows changes made here
+    PROF(life_update());               // Life: the day's nudges
+    PROF(usage_update());              // how the watch is used (Diagnostics)
+    PROF(weather_update());            // keeps a new weather push across restarts
+    PROF(briefing_update());           // the morning briefing, once a morning
+    PROF(charge_update());             // optimized charging: 80% overnight, full by the morning
     {
         // dimmer in the bedtime hours (not the flashlight or a Wallet code, which need it bright)
         static uint32_t s_dim_ms = 0;
@@ -798,23 +825,23 @@ void loop() {
             }
             Screen *top = ui_active_screen();
             if (top == &torch_screen || top == &wallet_screen) night = false;
-            display_set_brightness_cap(night ? 50 : 255);
+            PROF(display_set_brightness_cap(night ? 50 : 255));
         }
     }
-    home_update();               // the app's Faces tab follows gesture changes made here
-    low_power_update();          // the 10% offer, off again at 80%
-    fitness_update();            // rings: new day, saving, stand reminder
-    workout_update();            // a running workout: steps, GPS distance
-    voice_update();              // the wake word, awake or asleep
-    motion_update();             // fall detection, activity, reps, flicks - awake or asleep
-    sleeptrack_update();         // sleep tracking and the smart alarm
+    PROF(home_update());               // the app's Faces tab follows gesture changes made here
+    PROF(low_power_update());          // the 10% offer, off again at 80%
+    PROF(fitness_update());            // rings: new day, saving, stand reminder
+    PROF(workout_update());            // a running workout: steps, GPS distance
+    PROF(voice_update());              // the wake word, awake or asleep
+    PROF(motion_update());             // fall detection, activity, reps, flicks - awake or asleep
+    PROF(sleeptrack_update());         // sleep tracking and the smart alarm
 #if FEATURE_AUDIO
-    power_set_screen_off(asleep && !audio_is_playing());   // MP3 decode needs the clock
+    PROF(power_set_screen_off(asleep && !audio_is_playing()));   // MP3 decode needs the clock
 #else
-    power_set_screen_off(asleep);
+    PROF(power_set_screen_off(asleep));
 #endif
 #if FEATURE_BLE
-    ble_set_low_power(asleep);
+    PROF(ble_set_low_power(asleep));
 #endif
     {
         // a calm screen (a face ticking once a second): the CPU slows between
@@ -823,10 +850,10 @@ void loop() {
 #if FEATURE_AUDIO
         calm = calm && !audio_is_playing() && !audio_is_recording();
 #endif
-        power_set_ui_calm(calm);
+        PROF(power_set_ui_calm(calm));
     }
-    usb_mode_update();           // cable poll (2 Hz) + drive eject handling
-    power_update_sleep_policy(); // CPU clock + light sleep for this state (hal_power.cpp)
+    PROF(usb_mode_update());           // cable poll (2 Hz) + drive eject handling
+    PROF(power_update_sleep_policy()); // CPU clock + light sleep for this state (hal_power.cpp)
 
     if (!was_asleep && !asleep) {
         if (boot_evt == BTN_EVENT_SHORT_PRESS) {
@@ -837,7 +864,7 @@ void loop() {
             else ui_pop_screen();
         } else if (boot_evt == BTN_EVENT_LONG_PRESS) {
             if (ui_top_panel_is_open()) ui_top_panel_close();
-            ui_go_home();
+            PROF(ui_go_home());
         } else if (boot_evt == BTN_EVENT_DOUBLE_PRESS) {
             // BOOT twice: ask the assistant
             if (ui_top_panel_is_open()) ui_top_panel_close();
@@ -848,50 +875,50 @@ void loop() {
             // sleep_force_sleep() itself once it finishes, so the
             // display doesn't go dark until the animation has actually
             // been seen (see anim_lock.cpp).
-            lock_anim_set_mode(false, true);
-            ui_push(&lock_anim_screen);
+            PROF(lock_anim_set_mode(false, true));
+            PROF(ui_push(&lock_anim_screen));
         } else if (pwr_evt == BTN_EVENT_DOUBLE_PRESS) {
-            ui_pop_screen();
+            PROF(ui_pop_screen());
         } else if (pwr_evt == BTN_EVENT_LONG_PRESS) {
-            ui_push(&poweroff_screen);
+            PROF(ui_push(&poweroff_screen));
         }
     } else if (was_asleep && !asleep) {
         // Just woke up - play the "unlocking" particle animation on
         // top of whatever screen was showing before sleep.
-        lock_anim_set_mode(true, false);
-        ui_push(&lock_anim_screen);
+        PROF(lock_anim_set_mode(true, false));
+        PROF(ui_push(&lock_anim_screen));
     }
 
     if (asleep) {
         // Keep BLE alive during sleep — NimBLE has its own task but we
         // still need to process received data (time sync, watchface, etc.)
 #if FEATURE_BLE
-        ble_update();
-        notifications_update();
-        phone_link_update();
-        phone_images_update();      // decode an icon / cover that arrived
-        check_notes_sync();
+        PROF(ble_update());
+        PROF(notifications_update());
+        PROF(phone_link_update());
+        PROF(phone_images_update());      // decode an icon / cover that arrived
+        PROF(check_notes_sync());
 #endif
 #if FEATURE_WIFI
-        bambu_tick(); // internally a no-op unless enabled and WiFi is connected, same as the NTP poll above
+        PROF(bambu_tick()); // internally a no-op unless enabled and WiFi is connected, same as the NTP poll above
 #endif
 #if FEATURE_BLE
 
         if (ble_consume_findme_request()) {
             // Wake the display first - a "find me" response nobody can
             // see because the screen is still off defeats the purpose.
-            sleep_register_activity();
-            ui_push(&findme_screen);
+            PROF(sleep_register_activity());
+            PROF(ui_push(&findme_screen));
         }
 
         int y, mo, d, h, mi, s;
         if (ble_get_phone_time(y, mo, d, h, mi, s)) {
-            rtc_set(y, mo, d, h, mi, s);
+            PROF(rtc_set(y, mo, d, h, mi, s));
         }
 
         // Auto-switch to custom watchface even during sleep
         if (ble_watchface_ready() && watchface_current() != 2) {
-            watchface_set_current(2);
+            PROF(watchface_set_current(2));
         }
 #endif
 #if FEATURE_WIFI
@@ -903,13 +930,13 @@ void loop() {
         // indefinitely with nothing left to ever call wifi_disable().
         NtpStatus ntp_st = ntp_get_status();
         if (ntp_st == NTP_CONNECTING || ntp_st == NTP_SYNCING) {
-            ntp_update();
+            PROF(ntp_update());
         }
 #endif
 #if FEATURE_AUDIO
-        audio_idle_power();
+        PROF(audio_idle_power());
 #endif
-        aod_update();               // always-on clock: redraw on the minute
+        PROF(aod_update());               // always-on clock: redraw on the minute
         // Slower poll cadence than the awake path (was 50ms) - locked
         // state has nothing time-critical happening, so there's no
         // reason to re-check touch/motion/BLE this often. 150ms is
@@ -926,7 +953,7 @@ void loop() {
 #if FEATURE_GPS
         keep_awake = keep_awake || gps_is_enabled();
 #endif
-        power_set_keep_awake(keep_awake || notes_download_active() || wifi_xfer_active());
+        PROF(power_set_keep_awake(keep_awake || notes_download_active() || wifi_xfer_active()));
         // 250 ms: the touch controller's interrupt and BOOT wake the chip
         // at once anyway; this only paces the polling (raise to wake, the
         // PMU, the phone link) - fewer wake-ups in light sleep.
@@ -958,32 +985,33 @@ void loop() {
             uint8_t dim = g_app_settings.brightness * 2 / 5;
             if (dim > AUTO_DIM_LEVEL) dim = AUTO_DIM_LEVEL;
             if (dim < 8) dim = 8;
-            display_set_brightness(dim);
+            PROF(display_set_brightness(dim));
         } else if (!should_dim && s_auto_dimmed) {
             s_auto_dimmed = false;
-            display_set_brightness(g_app_settings.brightness);
+            PROF(display_set_brightness(g_app_settings.brightness));
         }
     }
 
     // Read touch and route to active screen
-    TouchPoint tp = touch_read();
+    TouchPoint tp;
+    PROF(tp = touch_read());
     static bool s_was_touched = false;
     if (tp.touched) {
-        ui_handle_touch(tp.x, tp.y, true);
+        PROF(ui_handle_touch(tp.x, tp.y, true));
     } else if (s_was_touched) {
-        ui_handle_touch(0, 0, false);
+        PROF(ui_handle_touch(0, 0, false));
     }
     s_was_touched = tp.touched;
 
     // Draw the active screen
-    ui_update();
+    PROF(ui_update());
 
     // Poll swipe gestures and route to active screen
-    ui_poll_gestures();
+    PROF(ui_poll_gestures());
 
     // Touch feedback for sleep timer
     if (touch_is_currently_touched()) {
-        sleep_register_activity();
+        PROF(sleep_register_activity());
     }
 
     // 1-second tick
@@ -1001,21 +1029,21 @@ void loop() {
         if (wf && wf->tick) wf->tick();
     }
 
-    vibrate_update();
+    PROF(vibrate_update());
 
 #if FEATURE_AUDIO
-    audio_update();
+    PROF(audio_update());
     // Rebuild CSV index when recording stops
     if (s_was_recording && !audio_is_recording()) {
         s_was_recording = false;
-        recordings_update_index();
+        PROF(recordings_update_index());
     }
     if (audio_is_recording()) s_was_recording = true;
 #endif
 
 #if FEATURE_GPS
-    gps_poll();
-    gps_probe_update();
+    PROF(gps_poll());
+    PROF(gps_probe_update());
 #endif
 
 #if FEATURE_WIFI
@@ -1029,24 +1057,24 @@ void loop() {
         // connect indefinitely instead of giving up and disabling.
         NtpStatus ntp_st = ntp_get_status();
         if (ntp_st == NTP_CONNECTING || ntp_st == NTP_SYNCING) {
-            ntp_update();
+            PROF(ntp_update());
         }
     }
 #endif
 
 #if FEATURE_BLE
-    ble_update();
-    notifications_update();
-    phone_link_update();
-    phone_images_update();      // decode an icon / cover that arrived
+    PROF(ble_update());
+    PROF(notifications_update());
+    PROF(phone_link_update());
+    PROF(phone_images_update());      // decode an icon / cover that arrived
 #endif
 #if FEATURE_WIFI
-    bambu_tick(); // internally a no-op unless enabled and WiFi is connected, same as the NTP poll below
+    PROF(bambu_tick()); // internally a no-op unless enabled and WiFi is connected, same as the NTP poll below
 #endif
 #if FEATURE_BLE
 
     if (ble_consume_findme_request()) {
-        ui_push(&findme_screen);
+        PROF(ui_push(&findme_screen));
     }
 
     // Auto-sync time on first connect
@@ -1054,7 +1082,7 @@ void loop() {
         s_ble_was_connected = true;
         int y, mo, d, h, mi, s;
         if (ble_get_phone_time(y, mo, d, h, mi, s)) {
-            rtc_set(y, mo, d, h, mi, s);
+            PROF(rtc_set(y, mo, d, h, mi, s));
             DEBUG_PRINTF("[main] time set from BLE phone (auto-sync)\n");
         }
     }
@@ -1064,21 +1092,21 @@ void loop() {
 
     int y, mo, d, h, mi, s;
     if (ble_get_phone_time(y, mo, d, h, mi, s)) {
-        rtc_set(y, mo, d, h, mi, s);
+        PROF(rtc_set(y, mo, d, h, mi, s));
         DEBUG_PRINTF("[main] time set from BLE phone\n");
     }
 
     // Check for file transfer events (modal + SD save)
-    check_file_transfer();
+    PROF(check_file_transfer());
 
     // Check for notes sync commands (file list, download, etc.)
-    check_notes_sync();
+    PROF(check_notes_sync());
 
     // Check for watchface data — auto-switch to custom watchface
     if (ble_watchface_ready() && watchface_current() != 2) {
         DEBUG_PRINTF("[main] watchface data received, switching to custom\n");
-        watchface_set_current(2);
-        ui_go_home();
+        PROF(watchface_set_current(2));
+        PROF(ui_go_home());
         const WatchfaceEntry *wf = watchface_get(2);
         if (wf && wf->screen) ui_push(wf->screen);
     }
@@ -1101,7 +1129,7 @@ void loop() {
         s_last_charge_check_ms = millis();
         bool charging_now = power_is_charging();
         if (charging_now && !s_was_charging) {
-            ui_push(&charging_anim_screen);
+            PROF(ui_push(&charging_anim_screen));
         }
         s_was_charging = charging_now;
     }
