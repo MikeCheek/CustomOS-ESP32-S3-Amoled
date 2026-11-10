@@ -1072,7 +1072,14 @@ static void folder_create() {
     build_field();
 }
 
-static void folder_destroy() {
+// The top level and a folder share one field. Leaving the folder isn't
+// done in its on_destroy: that also runs when an app (a game) opens on top
+// of the folder, which would turn the folder still under the game into the
+// top level - back from the game it showed the top level, and going back
+// again played the folder closing a second time. The view goes back to the
+// top level once the top-level menu is really the screen on top again.
+static void sync_view() {
+    if (s_folder < 0 || ui_active_screen() != &menu_screen) return;
     // back to the top level, where it was - and the folder closes into its icon
     s_folder = -1;
     build_field();
@@ -1156,6 +1163,7 @@ static void draw_honeycomb(uint16_t *fb) {
 }
 
 static void menu_draw() {
+    sync_view();
     Arduino_GFX *g = ui_gfx();
     uint16_t *fb = ui_framebuffer();
     if (!g || !fb) return;
@@ -1216,6 +1224,7 @@ static void band(float &px, float &py) {
 }
 
 static void menu_touch(int x, int y, bool pressed) {
+    sync_view();
     if (s_launch >= 0) return;
     if (pressed) {
         if (!s_dragging) {
@@ -1271,6 +1280,7 @@ static void menu_touch(int x, int y, bool pressed) {
 }
 
 static void menu_tick() {
+    sync_view();
     // back from the app opened here: play it closing into its icon
     if (s_opened >= 0) {
         if (!listing() && !ui_last_pop_was_drag()) {   // a drag back already showed the menu
@@ -1373,12 +1383,14 @@ Screen menu_folder_screen = {
     menu_draw,
     menu_touch,
     menu_tick,
-    folder_destroy,
+    nullptr,   // leaving: sync_view(), once the top level is back on top
     menu_gesture,
     150,
     false, false, false, false,
     true,
 };
+
+int menu_view_folder() { return s_folder; }
 
 void menu_open_folder(int category) {
     s_next_folder = category;

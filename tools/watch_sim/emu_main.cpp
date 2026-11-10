@@ -17,6 +17,7 @@
 #include "game_roulette.h"
 #include "game_videopoker.h"
 #include "game_dice.h"
+#include "app_menu.h"
 #include "casino_wallet.h"
 #include <SD.h>
 #include "game_audio.h"
@@ -468,6 +469,25 @@ __attribute__((visibility("default"))) int emu_selftest() {
         memcpy(g_app_settings.home_act, keep, sizeof(keep));
         tiles_defaults(g_app_settings.tiles);
         pop_all(m, sizeof(m), "\"e\":\"home\"");
+    }
+    // ---- the app menu: a game opened from a folder, then back twice
+    {
+        ui_go_home();
+        ui_push(&menu_screen);
+        emu_step();
+        menu_open_folder(0);   // Games
+        emu_step();
+        check(menu_view_folder() == 0 && ui_active_screen() != &menu_screen, "menu: the Games folder opens");
+        ui_push(&dice_screen);   // a game, opened from the folder
+        emu_step();
+        ui_pop_screen();
+        for (uint32_t t0 = millis(); millis() - t0 < 300;) { emu_step(); delay(20); }
+        check(menu_view_folder() == 0 && ui_active_screen() != &menu_screen, "menu: back from a game, still in the folder");
+        ui_pop_screen();
+        for (uint32_t t0 = millis(); millis() - t0 < 300;) { emu_step(); delay(20); }   // its next frames
+        check(menu_view_folder() == -1 && ui_active_screen() == &menu_screen, "menu: back again, the top level");
+        ui_go_home();
+        emu_step();
     }
     // ---- the assistant: a follow-up after a spoken answer, speech asked for
     {
