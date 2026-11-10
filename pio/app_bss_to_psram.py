@@ -94,4 +94,28 @@ def move_bss(target, source, env):
     _log("%d sections from %d files moved to PSRAM (%d bytes)" % (moved, files, total))
 
 
+def _rebuild_if_changed():
+    # The objects are renamed in place, so a change here (a file added to
+    # KEEP_INTERNAL, say) needs them compiled afresh - and the link re-run
+    # even when no source changed (a cached build).
+    import hashlib
+    import shutil
+    build = Path(env.subst("$BUILD_DIR"))  # noqa: F821
+    stamp = build / "app_bss_to_psram.stamp"
+    me = Path(env.subst("$PROJECT_DIR")) / "pio" / "app_bss_to_psram.py"  # noqa: F821
+    digest = hashlib.md5(me.read_bytes()).hexdigest() if me.is_file() else ""
+    try:
+        old = stamp.read_text().strip() if stamp.is_file() else ""
+    except OSError:
+        old = ""
+    if old == digest:
+        return
+    shutil.rmtree(build / "src", ignore_errors=True)
+    for elf in build.glob("*.elf"):
+        elf.unlink()
+    build.mkdir(parents=True, exist_ok=True)
+    stamp.write_text(digest)
+
+
+_rebuild_if_changed()
 env.AddPreAction("$BUILD_DIR/${PROGNAME}.elf", move_bss)  # noqa: F821
