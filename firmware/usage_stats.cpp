@@ -42,10 +42,12 @@ static bool s_was_asleep = false, s_was_conn = false;
 
 // What kept the watch from sleeping deeply with the screen off, in seconds
 // today (keys as sent: see usage_stats.h).
-enum AwakeWhy { AW_BUILD, AW_SETTING, AW_WAKEWORD, AW_AOD, AW_GPS, AW_WIFI, AW_ESPNOW, AW_AUDIO, AW_USBMODE, AW_N };
-static const char *const AW_KEYS[AW_N] = {"build", "setting", "wakeword", "aod", "gps", "wifi", "espnow", "audio", "usbmode"};
+enum AwakeWhy { AW_BUILD, AW_SETTING, AW_WAKEWORD, AW_AOD, AW_GPS, AW_WIFI, AW_ESPNOW, AW_AUDIO, AW_USBMODE, AW_AUDIOHW, AW_N };
+static const char *const AW_KEYS[AW_N] = {"build", "setting", "wakeword", "aod", "gps", "wifi", "espnow", "audio", "usbmode", "audiohw"};
 static uint32_t s_aw[AW_N];
 static uint32_t s_off_s = 0;   // seconds with the screen off today (unplugged)
+static uint32_t s_slept_ms = 0; // ...of which the chip was in light sleep (PlatformIO build)
+static uint64_t s_slept_mark = 0;
 
 // The last 7 days, newest first (part 4): kept with the rest in the store.
 struct DaySum { uint32_t date; uint16_t on_min, wakes; uint8_t drop, charges; uint16_t pad; };
@@ -188,6 +190,7 @@ static void new_day() {
     s_wakes = s_disc = s_ntf = 0;
     memset(s_aw, 0, sizeof(s_aw));
     s_off_s = 0;
+    s_slept_ms = 0;
 }
 
 void usage_update() {
@@ -212,6 +215,13 @@ void usage_update() {
     static bool plugged = false;
     static uint32_t plugged_ms = 0;
     if (!plugged_ms || ms - plugged_ms > 10000) { plugged_ms = ms ? ms : 1; plugged = power_vbus_present(); }   // the PMU, every 10 s
+    {
+        // light sleep since the last second, counted only for unplugged screen-off seconds
+        uint64_t sl = power_slept_us();
+        uint64_t d = sl - s_slept_mark;
+        s_slept_mark = sl;
+        if (asleep && !plugged) s_slept_ms += (uint32_t)((d > 2000000ULL ? 2000000ULL : d) / 1000);
+    }
     if (asleep && !plugged) {
         s_off_s++;
         if (!power_auto_sleep_available()) s_aw[AW_BUILD]++;
@@ -219,6 +229,7 @@ void usage_update() {
 #if FEATURE_AUDIO
         if (voice_wake_keeps_awake()) s_aw[AW_WAKEWORD]++;
         if (audio_is_playing()) s_aw[AW_AUDIO]++;
+        else if (audio_hw_running()) s_aw[AW_AUDIOHW]++;   // the I2S port left on: no light sleep
 #endif
         if (g_app_settings.aod_on) s_aw[AW_AOD]++;
 #if FEATURE_GPS
@@ -326,6 +337,7 @@ void usage_send() {
         d["e"] = "usage"; d["p"] = 3;
         d["off"] = s_off_s;
         d["pm"] = power_auto_sleep_available() ? 1 : 0;
+        if (power_auto_sleep_available()) d["sl"] = s_slept_ms / 1000;   // seconds in light sleep, of "off"
         JsonObject aw = d["aw"].to<JsonObject>();
         for (int i = 0; i < AW_N; i++)
             if (s_aw[i]) aw[AW_KEYS[i]] = s_aw[i];

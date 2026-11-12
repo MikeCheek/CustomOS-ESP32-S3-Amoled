@@ -22,6 +22,9 @@ class WatchUsage {
   /// seconds it was off; [hasPowerManagement] false: a build without it.
   final Map<String, int> awake;
   final int offS;
+  /// Of [offS], seconds the chip really spent in light sleep (firmware
+  /// 3.4.1+, PlatformIO build); null when the watch doesn't measure it.
+  final int? sleptS;
   final bool hasPowerManagement;
 
   /// The last 7 days as the watch kept them (part 4, newest first): date,
@@ -50,6 +53,7 @@ class WatchUsage {
     this.resetReason = '',
     this.awake = const {},
     this.offS = 0,
+    this.sleptS,
     this.hasPowerManagement = true,
     this.week = const [],
   });
@@ -98,6 +102,7 @@ class WatchUsage {
           if (e.value is num && (e.value as num) > 0) '${e.key}': (e.value as num).toInt(),
       },
       offS: (d?['off'] as num?)?.toInt() ?? 0,
+      sleptS: (d?['sl'] as num?)?.toInt(),
       hasPowerManagement: (d?['pm'] as num?)?.toInt() != 0,
       week: [
         for (final r in (wk?['wk'] as List? ?? const []))
@@ -246,6 +251,10 @@ const awakeLabels = <String, (String, String)>{
   'espnow': ('ESP-NOW', 'Turn ESP-NOW off (Settings > Connections)'),
   'audio': ('Music on the watch', 'Playing on the watch keeps it awake - expected while you listen'),
   'usbmode': ('A USB mode', 'Switch the USB mode back to normal (Settings > System > USB)'),
+  'audiohw': (
+    'The audio hardware',
+    'It was left running after the microphone was used. Firmware 3.4.1 fixes this - update the watch',
+  ),
 };
 
 class Finding {
@@ -282,8 +291,25 @@ List<Finding> usageFindings(WatchUsage u, {bool crashReport = false, bool firmwa
       f.add(Finding(Severity.warn, '${info.$1} kept it awake $h h today', info.$2));
     }
   }
+  // Measured light sleep (newer firmware): how much of the screen-off time
+  // the chip really slept. Low with no known cause = something unlisted.
+  final slept = u.sleptS;
+  if (slept != null && u.offS >= 1800 && u.hasPowerManagement) {
+    final pct = (100 * slept / u.offS).round().clamp(0, 100);
+    if (pct < 60 && u.awake.isEmpty) {
+      f.add(
+        Finding(
+          Severity.warn,
+          'The watch slept only $pct% of the screen-off time',
+          'Nothing known kept it awake: send the serial log ([power] lines) with a bug report',
+        ),
+      );
+    } else if (pct >= 60) {
+      f.add(Finding(Severity.ok, 'Asleep $pct% of the screen-off time', 'Standby is working as it should'));
+    }
+  }
   final r = u.drainRates();
-  if (r != null && r.off > 2.0 && u.awake.isEmpty) {
+  if (r != null && r.off > 2.0 && u.awake.isEmpty && (slept == null || slept < u.offS * 0.6)) {
     f.add(
       Finding(
         Severity.warn,

@@ -70,6 +70,8 @@ bool audio_update();
 // Powers the speaker amp down after a few silent seconds (called by
 // audio_update(); call it while the screen is off too).
 void audio_idle_power();
+// The I2S port is running (PlatformIO build: it then keeps the chip out of light sleep).
+bool audio_hw_running();
 // Stop any currently-playing audio.
 void audio_stop_playback();
 // Returns true if audio is currently playing (also while paused - a

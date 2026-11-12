@@ -235,10 +235,27 @@ static void hold(esp_pm_lock_handle_t lock, bool &held, bool want) {
 
 bool power_auto_sleep_available() { return true; }
 
+// How long the chip actually light-slept (auto light sleep exit callback,
+// CONFIG_PM_LIGHT_SLEEP_CALLBACKS): the usage report compares it with the
+// screen-off time, so a drain nobody can explain shows up as "awake".
+static volatile int64_t s_slept_us = 0;
+#if CONFIG_PM_LIGHT_SLEEP_CALLBACKS
+static esp_err_t IRAM_ATTR on_sleep_exit(int64_t slept_us, void *) {
+    s_slept_us = s_slept_us + slept_us;   // (no += on a volatile: C++20)
+    return ESP_OK;
+}
+#endif
+uint64_t power_slept_us() { return (uint64_t)s_slept_us; }
+
 void power_update_sleep_policy() {
     bool vbus = vbus_cached();
     uint16_t want_max = cpu_cap_mhz();
     if (!s_lock_awake) {
+#if CONFIG_PM_LIGHT_SLEEP_CALLBACKS
+        esp_pm_sleep_cbs_register_config_t cbs = {};
+        cbs.exit_cb = on_sleep_exit;
+        esp_pm_light_sleep_register_cbs(&cbs);
+#endif
         esp_pm_lock_create(ESP_PM_NO_LIGHT_SLEEP, 0, "awake", &s_lock_awake);
         esp_pm_lock_create(ESP_PM_CPU_FREQ_MAX, 0, "ui", &s_lock_ui);
         hold(s_lock_awake, s_awake_held, true);   // until the first decision below
@@ -272,6 +289,7 @@ void power_update_sleep_policy() {
 // and the screen-off loop light-sleeps by hand (power_light_sleep()) when
 // every radio is off.
 bool power_auto_sleep_available() { return false; }
+uint64_t power_slept_us() { return 0; }
 
 void power_update_sleep_policy() {
     vbus_cached();   // tracks the unplug moment

@@ -50,6 +50,8 @@ bool power_pek_long_press_pending();
 //    screen off; light sleep only by hand with every radio off.
 void power_update_sleep_policy();
 bool power_auto_sleep_available();   // true in the PlatformIO build
+// Total time spent in auto light sleep since boot (PlatformIO build; 0 otherwise).
+uint64_t power_slept_us();
 
 // Screen off (asleep, or the always-on clock).
 void power_set_screen_off(bool off);

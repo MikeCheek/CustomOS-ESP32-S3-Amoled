@@ -1,4 +1,5 @@
 #include "hal_audio.h"
+#include "hal_power.h"
 #include "board_pins.h"
 #include "config.h"
 #include <Arduino.h>
@@ -63,6 +64,7 @@ static volatile bool s_pa_on = true;
 // The prebuilt Arduino core can't light-sleep anyway: there it keeps running.
 static volatile bool s_i2s_running = true;
 static volatile bool s_mic_hold = false;   // audio_mic_hold(): someone listens in the background
+static volatile uint32_t s_last_mic_ms = 0;  // last audio_mic_read(): a reader between calls keeps the port
 
 static inline void i2s_ensure_running() {
 #if CONFIG_PM_ENABLE
@@ -2028,29 +2030,49 @@ int audio_mic_read(int16_t *stereo, int max_frames, uint32_t timeout_ms) {
     size_t bytes_read = 0;
     if (i2s_read(I2S_PORT, stereo, (size_t)max_frames * 4, &bytes_read, pdMS_TO_TICKS(timeout_ms)) != ESP_OK) return 0;
     int frames = (int)(bytes_read / 4);
+    s_last_mic_ms = millis();
     if (frames > 0) mic_apply_gain(stereo, frames * 2);
     return frames;
 }
 
 void audio_mic_hold(bool on) { s_mic_hold = on; }
 
+// The speaker amp and (PlatformIO build) the I2S port are switched off on
+// their own: the amp after 4 s without output, the port once nobody plays,
+// records or listens. These used to be one step gated on the amp being on,
+// so a port started by the microphone alone - the wake word with the screen
+// on, the Settings mic meter, a recording that outlived the amp - was never
+// stopped again: its PM lock (APB_FREQ_MAX) then kept the chip out of
+// light sleep for good, ~40 mA instead of a few mA with the screen off.
 void audio_idle_power() {
-    if (!s_pa_on || millis() - s_last_out_ms <= 4000 || audio_is_playing()) return;
+    uint32_t now = millis();
+    bool quiet = now - s_last_out_ms > 4000 && !audio_is_playing();
+    bool pa_due = s_pa_on && quiet;
+#if CONFIG_PM_ENABLE
+    bool i2s_due = s_i2s_running && quiet && !s_recording && !s_mic_hold && now - s_last_mic_ms > 2000;
+#else
+    bool i2s_due = false;
+#endif
+    if (!pa_due && !i2s_due) return;
     // Same mutex as the writers; if one holds it, audio is in flight anyway.
     if (s_i2s_mutex && xSemaphoreTake(s_i2s_mutex, 0) != pdTRUE) return;
-    if (millis() - s_last_out_ms > 4000) {
+    now = millis();
+    quiet = now - s_last_out_ms > 4000 && !audio_is_playing();
+    if (s_pa_on && quiet) {
         s_pa_on = false;
         digitalWrite(PIN_AUDIO_PA, AUDIO_PA_ACTIVE_HIGH ? LOW : HIGH);
-#if CONFIG_PM_ENABLE
-        if (s_i2s_running && !s_recording && !s_mic_hold) {
-            i2s_zero_dma_buffer(I2S_PORT);
-            i2s_stop(I2S_PORT);
-            s_i2s_running = false;
-        }
-#endif
     }
+#if CONFIG_PM_ENABLE
+    if (s_i2s_running && quiet && !s_recording && !s_mic_hold && now - s_last_mic_ms > 2000) {
+        i2s_zero_dma_buffer(I2S_PORT);
+        i2s_stop(I2S_PORT);
+        s_i2s_running = false;
+    }
+#endif
     if (s_i2s_mutex) xSemaphoreGive(s_i2s_mutex);
 }
+
+bool audio_hw_running() { return s_i2s_running && power_auto_sleep_available(); }
 
 bool audio_update() {
     audio_idle_power();
@@ -2137,6 +2159,7 @@ bool audio_play_wav(const char *) { return false; }
 bool audio_play_mp3(const char *) { return false; }
 bool audio_update() { return false; }
 void audio_idle_power() {}
+bool audio_hw_running() { return false; }
 void audio_stop_playback() {}
 bool audio_is_playing() { return false; }
 void audio_set_paused(bool) {}
