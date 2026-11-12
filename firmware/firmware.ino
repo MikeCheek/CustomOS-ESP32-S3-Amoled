@@ -37,6 +37,7 @@
 #include "app_workout.h"
 #include "app_life.h"
 #include "usage_stats.h"
+#include "power_profile.h"
 #include "home_gestures.h"
 #include "app_wallet.h"
 #include "store.h"
@@ -809,6 +810,7 @@ void loop() {
     PROF(look_update());               // the app's Faces tab follows changes made here
     PROF(life_update());               // Life: the day's nudges
     PROF(usage_update());              // how the watch is used (Diagnostics)
+    PROF(power_profile_update(asleep)); // where the battery goes: sleep, locks, CPU per feature
     PROF(weather_update());            // keeps a new weather push across restarts
     PROF(briefing_update());           // the morning briefing, once a morning
     PROF(charge_update());             // optimized charging: 80% overnight, full by the morning

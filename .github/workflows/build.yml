@@ -181,7 +181,7 @@ jobs:
           # The settings that make the chip fast (platformio.ini): what the build really used
           SDK=$(ls sdkconfig.watch .pio/build/watch/sdkconfig 2>/dev/null | head -1)
           echo "speed settings ($SDK):"
-          grep -E '^CONFIG_(SPIRAM_SPEED|SPIRAM_MODE|ESPTOOLPY_FLASH(MODE|FREQ)_|ESP32S3_(INSTRUCTION|DATA)_CACHE|FREERTOS_HZ|COMPILER_OPTIMIZATION|ESP_DEFAULT_CPU_FREQ_MHZ)' "$SDK" | tee -a "$GITHUB_STEP_SUMMARY" || true
+          grep -E '^CONFIG_(SPIRAM_SPEED|SPIRAM_MODE|ESPTOOLPY_FLASH(MODE|FREQ)_|ESP32S3_(INSTRUCTION|DATA)_CACHE|FREERTOS_HZ|COMPILER_OPTIMIZATION|ESP_DEFAULT_CPU_FREQ_MHZ|PM_PROFILING|FREERTOS_GENERATE_RUN_TIME_STATS|FREERTOS_USE_TRACE_FACILITY|FREERTOS_RUN_TIME_COUNTER_TYPE)' "$SDK" | tee -a "$GITHUB_STEP_SUMMARY" || true
           # TinyUSB's buffers must be in PSRAM (0x3c.../0x3d...), not internal
           # RAM (0x3f...) - Wi-Fi needs that room (pio/tinyusb_to_psram.py)
           addr=$(echo "$syms" | awk '$3 == "_tud_cfg" { print $1; exit }')
@@ -320,6 +320,9 @@ jobs:
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
+          # pinned: Flutter 3.50's Gradle plugin needs Android Gradle Plugin 9
+          # (the app is on 8.11) - move both up together
+          flutter-version: 3.47.9
           cache: true
 
       # The app pins an NDK (android/app/build.gradle.kts ndkVersion) that the
@@ -331,8 +334,10 @@ jobs:
           # The app's NDK, plus Flutter's default one that plugins (e.g. jni)
           # build with - otherwise Gradle downloads it mid-build, and a bad
           # download there fails the job ("Archive is not a ZIP archive").
+          # (Flutter's own sources only: its tests name made-up versions, like
+          # "29.0.0", that sdkmanager can't find)
           NDKS=$( { grep -oP 'ndkVersion\s*=\s*"\K[^"]+' companion_app/android/app/build.gradle.kts
-                    grep -rhoP 'ndkVersion\s*(:\s*String)?\s*=\s*"\K[0-9.]+' "$FLUTTER_ROOT/packages/flutter_tools/gradle" ; } 2>/dev/null | sort -u)
+                    grep -rhoP --exclude-dir=test 'ndkVersion\s*(:\s*String)?\s*=\s*"\K[0-9.]+' "$FLUTTER_ROOT/packages/flutter_tools/gradle" ; } 2>/dev/null | sort -u)
           SDKM="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
           yes | "$SDKM" --licenses > /dev/null || true
           for NDK in $NDKS; do
@@ -432,6 +437,9 @@ jobs:
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
+          # pinned: Flutter 3.50's Gradle plugin needs Android Gradle Plugin 9
+          # (the app is on 8.11) - move both up together
+          flutter-version: 3.47.9
           cache: true
 
       - run: flutter pub get
