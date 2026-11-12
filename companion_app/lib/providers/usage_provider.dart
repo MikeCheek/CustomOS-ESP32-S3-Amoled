@@ -73,3 +73,25 @@ class UsageNotifier extends StateNotifier<UsageState> {
 }
 
 final usageProvider = StateNotifierProvider<UsageNotifier, UsageState>((ref) => UsageNotifier(ref));
+
+/// The watch's battery capacity in mAh, for turning the drain into mA
+/// (the board doesn't know which cell is fitted). Kept on the phone.
+class WatchBatteryNotifier extends StateNotifier<int> {
+  static const _key = 'watch_battery_mah';
+  static const fallback = 350;
+  WatchBatteryNotifier() : super(fallback) {
+    SharedPreferences.getInstance().then((p) {
+      if (mounted) state = p.getInt(_key) ?? fallback;
+    });
+  }
+
+  Future<void> set(int mah) async {
+    if (mah < 50 || mah > 5000) return;
+    state = mah;
+    final p = await SharedPreferences.getInstance();
+    await p.setInt(_key, mah);
+  }
+}
+
+final StateNotifierProvider<WatchBatteryNotifier, int> watchBatteryMahProvider =
+    StateNotifierProvider<WatchBatteryNotifier, int>((ref) => WatchBatteryNotifier());

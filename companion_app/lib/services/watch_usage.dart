@@ -32,6 +32,10 @@ class WatchUsage {
   /// screen-on minutes, wake-ups, battery % used unplugged, charges.
   final List<UsageDay> week;
 
+  /// Measured on the watch today (part 5, firmware/power_profile.h): time in
+  /// light sleep, power locks held, CPU per feature - screen off and on.
+  final PowerProfile? profile;
+
   const WatchUsage({
     required this.battery,
     required this.charging,
@@ -57,12 +61,13 @@ class WatchUsage {
     this.hasPowerManagement = true,
     this.features = const {},
     this.week = const [],
+    this.profile,
   });
 
   /// Puts the parts together (in any order); null until the first three
   /// are here (the fourth, what kept it awake, comes from newer firmware).
   static WatchUsage? fromParts(Map<int, Map<String, dynamic>> p, DateTime at) {
-    final a = p[0], b = p[1], c = p[2], d = p[3], wk = p[4];
+    final a = p[0], b = p[1], c = p[2], d = p[3], wk = p[4], pf = p[5];
     if (a == null || b == null || c == null) return null;
     final hex = a['bat'] as String? ?? '';
     final bat = <int?>[
@@ -119,6 +124,7 @@ class WatchUsage {
               (r[4] as num).toInt(),
             ),
       ],
+      profile: PowerProfile.fromJson(pf?['pf']),
     );
   }
 
@@ -256,6 +262,120 @@ class WatchUsage {
   }
 }
 
+/// One state's share of today, as the watch measured it (power_profile.cpp).
+class ProfileWindow {
+  final int seconds;
+  final int? sleepPermille; // of the time, in light sleep (null: not measured)
+  final Map<String, int> cpu; // feature -> permille of one core
+  final List<(String, int)> locks; // power lock -> permille of the time held, longest first
+  const ProfileWindow(this.seconds, this.sleepPermille, this.cpu, this.locks);
+
+  static ProfileWindow? fromJson(dynamic j) {
+    if (j is! Map) return null;
+    final t = (j['t'] as num?)?.toInt() ?? 0;
+    if (t <= 0) return null;
+    return ProfileWindow(
+      t,
+      (j['slp'] as num?)?.toInt(),
+      {
+        for (final e in ((j['cpu'] as Map?) ?? const {}).entries)
+          if (e.value is num) '${e.key}': (e.value as num).toInt(),
+      },
+      [
+        for (final l in (j['lk'] as List? ?? const []))
+          if (l is List && l.length >= 2) ('${l[0]}', (l[1] as num).toInt()),
+      ],
+    );
+  }
+
+  double get asleep => (sleepPermille ?? 0) / 1000;
+  double get cpuTotal => cpu.values.fold(0, (a, b) => a + b) / 1000;
+}
+
+/// One row of [PowerProfile.breakdown].
+class DrainShare {
+  final String label, detail;
+  final double share; // 0..1 of the drain
+  final double? mA; // with a measured drain to scale by
+  const DrainShare(this.label, this.detail, this.share, this.mA);
+}
+
+class PowerProfile {
+  final ProfileWindow? off, on;
+  const PowerProfile(this.off, this.on);
+
+  static PowerProfile? fromJson(dynamic j) {
+    if (j is! Map) return null;
+    final off = ProfileWindow.fromJson(j['off']), on = ProfileWindow.fromJson(j['on']);
+    return off == null && on == null ? null : PowerProfile(off, on);
+  }
+
+  /// What a feature's CPU time is called, and what it covers.
+  static const features = <String, (String, String)>{
+    'loop': ('Main loop', 'apps, checks, the phone link'),
+    'motion': ('Motion sensing', 'fall detection, activity, raise to wake, flick'),
+    'bt': ('Bluetooth', 'the link to the phone'),
+    'wifi': ('Wi-Fi', 'updates, time sync, transfers'),
+    'display': ('Display', 'sending frames to the screen'),
+    'wakeword': ('Wake word', 'listening for the word'),
+    'sound': ('Sound', 'speaker and recording'),
+    'update': ('Firmware update', 'checking and downloading'),
+    'system': ('System', 'timers, drivers, everything else'),
+  };
+
+  /// A power lock as people would call it (the names are the drivers').
+  static String lockLabel(String name) {
+    final n = name.toLowerCase();
+    if (n == 'awake') return 'the watch itself (screen, cable, Wi-Fi, GPS, wake word, Deep sleep off)';
+    if (n == 'ui') return 'the screen at full speed';
+    if (n.contains('i2s')) return 'sound (I2S audio clock)';
+    if (n.startsWith('bt') || n.contains('ble') || n.contains('nimble')) return 'Bluetooth';
+    if (n.contains('wifi')) return 'Wi-Fi';
+    if (n.contains('spi')) return 'SPI (screen, SD card)';
+    if (n.contains('i2c')) return 'I2C (sensors)';
+    if (n.contains('uart')) return 'UART (serial, GPS)';
+    if (n.contains('usb')) return 'USB';
+    return name;
+  }
+
+  // Rough draw of an ESP32-S3 like the watch's, for weighing the parts
+  // against each other (then scaled to the measured drain).
+  static const _sleepMa = 1.5, _awakeIdleMa = 18.0, _cpuMa = 30.0;
+
+  /// Where the drain went in [w]: light sleep, awake but idle (and what held
+  /// it awake), and each feature's CPU time - shares of the drain, and mA
+  /// when [measuredMa] (the drain measured in that state) is known. Most first.
+  static List<DrainShare> breakdown(ProfileWindow w, {double? measuredMa}) {
+    final rows = <(String, String, double)>[];
+    final slept = w.sleepPermille == null ? null : w.asleep;
+    final cpu = w.cpuTotal.clamp(0.0, 2.0);
+    if (slept != null) {
+      rows.add(('Asleep', 'light sleep: the least the watch can draw', slept * _sleepMa));
+      final idle = (1 - slept - cpu / 2).clamp(0.0, 1.0);
+      final held = [
+        for (final (n, pm) in w.locks)
+          if (pm >= 50) lockLabel(n),
+      ];
+      rows.add((
+        'Awake, doing nothing',
+        held.isEmpty ? 'woken often, no single cause' : 'kept awake by ${held.take(2).join(' and ')}',
+        idle * _awakeIdleMa,
+      ));
+    }
+    for (final e in w.cpu.entries) {
+      final f = features[e.key] ?? (e.key, '');
+      rows.add((f.$1, f.$2, e.value / 1000 * _cpuMa));
+    }
+    final total = rows.fold(0.0, (a, r) => a + r.$3);
+    if (total <= 0) return const [];
+    final out = [
+      for (final (l, d, v) in rows)
+        if (v / total >= 0.005) DrainShare(l, d, v / total, measuredMa == null ? null : measuredMa * v / total),
+    ]..sort((a, b) => b.share.compareTo(a.share));
+    return out;
+  }
+}
+
 /// One past day on the watch (usage part 4).
 class UsageDay {
   final DateTime date;
@@ -317,12 +437,32 @@ List<Finding> usageFindings(WatchUsage u, {bool crashReport = false, bool firmwa
     }
   }
   final r = u.drainRates();
-  if (r != null && r.off > 2.0 && u.awake.isEmpty) {
+  // measured: hardly asleep with the screen off, and what held it awake
+  final off = u.profile?.off;
+  final measuredAwake = off != null && off.seconds >= 1800 && off.sleepPermille != null && off.sleepPermille! < 600;
+  if (measuredAwake) {
+    final held = [
+      for (final (n, pm) in off.locks)
+        if (pm >= 200) '${PowerProfile.lockLabel(n)} (${(pm / 10).round()}%)',
+    ];
+    f.add(
+      Finding(
+        Severity.warn,
+        'Asleep only ${(off.sleepPermille! / 10).round()}% of the time with the screen off',
+        held.isEmpty
+            ? 'Something wakes it very often - see the battery profiler below'
+            : 'Kept awake by ${held.join(', ')} - see the battery profiler below',
+      ),
+    );
+  }
+  if (r != null && r.off > 2.0 && u.awake.isEmpty && !measuredAwake) {
     f.add(
       Finding(
         Severity.warn,
         'High drain with the screen off (${r.off.toStringAsFixed(1)}%/h)',
-        'Something keeps the watch awake: the wake word, Wi-Fi, GPS or always-on. Low Power Mode turns them off',
+        off != null
+            ? 'The battery profiler below shows where it goes'
+            : 'Something keeps the watch awake: the wake word, Wi-Fi, GPS or always-on. Low Power Mode turns them off',
       ),
     );
   }

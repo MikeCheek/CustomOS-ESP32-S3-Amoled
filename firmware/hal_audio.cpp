@@ -2036,18 +2036,34 @@ int audio_mic_read(int16_t *stereo, int max_frames, uint32_t timeout_ms) {
 
 void audio_mic_hold(bool on) { s_mic_hold = on; }
 
+// Quiet for 4 s: the amplifier off, and I2S stopped. The two are separate:
+// I2S runs from boot (the codecs need MCLK to be set up) with the amplifier
+// never switched on until something plays - stopping I2S only when the
+// amplifier went off left it running all day after a boot with no sound,
+// and a running I2S driver holds a power lock that keeps the chip out of
+// light sleep (~45 mA with the screen off instead of a few).
 void audio_idle_power() {
-    if (!s_pa_on || millis() - s_last_out_ms <= 4000 || audio_is_playing()) return;
+    if (audio_is_playing() || millis() - s_last_out_ms <= 4000) return;
+    bool pa_idle = s_pa_on;
+#if CONFIG_PM_ENABLE
+    bool i2s_idle = s_i2s_running && !s_recording && !s_mic_hold;
+#else
+    bool i2s_idle = false;
+#endif
+    if (!pa_idle && !i2s_idle) return;
     // Same mutex as the writers; if one holds it, audio is in flight anyway.
     if (s_i2s_mutex && xSemaphoreTake(s_i2s_mutex, 0) != pdTRUE) return;
     if (millis() - s_last_out_ms > 4000) {
-        s_pa_on = false;
-        digitalWrite(PIN_AUDIO_PA, AUDIO_PA_ACTIVE_HIGH ? LOW : HIGH);
+        if (s_pa_on) {
+            s_pa_on = false;
+            digitalWrite(PIN_AUDIO_PA, AUDIO_PA_ACTIVE_HIGH ? LOW : HIGH);
+        }
 #if CONFIG_PM_ENABLE
         if (s_i2s_running && !s_recording && !s_mic_hold) {
             i2s_zero_dma_buffer(I2S_PORT);
             i2s_stop(I2S_PORT);
             s_i2s_running = false;
+            DEBUG_PRINTF("[audio] idle: I2S stopped\n");
         }
 #endif
     }

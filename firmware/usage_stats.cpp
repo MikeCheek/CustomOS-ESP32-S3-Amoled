@@ -21,6 +21,7 @@
 #include "app_settings_state.h"
 #include "hal_usb.h"
 #include "voice_sr.h"
+#include "power_profile.h"
 #include <Arduino.h>
 #include <Preferences.h>
 #include <esp_heap_caps.h>
@@ -180,6 +181,7 @@ static void add_app_time(const char *name) {
 }
 
 static void new_day() {
+    power_profile_new_day();
     // yesterday into the week
     if (s_date_today) {
         uint32_t on = 0;
@@ -365,6 +367,13 @@ void usage_send() {
             JsonArray r = w.add<JsonArray>();
             r.add(x.date); r.add(x.on_min); r.add(x.wakes); r.add(x.drop); r.add(x.charges);
         }
+        phone_link_send(d);
+    }
+    if (power_profile_available()) {
+        // part 5: measured - time asleep, what kept it awake, CPU per feature (power_profile.h)
+        JsonDocument d;
+        d["e"] = "usage"; d["p"] = 5;
+        power_profile_json(d["pf"].to<JsonObject>());
         phone_link_send(d);
     }
 }

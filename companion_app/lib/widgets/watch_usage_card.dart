@@ -55,7 +55,8 @@ class WatchUsageSection extends ConsumerWidget {
     final rates = u.drainRates();
     final life = u.fullChargeHours();
     final shares = u.drainShares();
-    final costs = u.featureCosts();
+    final mah = ref.watch(watchBatteryMahProvider);
+    final costs = u.featureCosts(batteryMah: mah);
     final peaks = u.peakHours();
     final findings = usageFindings(
       u,
@@ -173,14 +174,19 @@ class WatchUsageSection extends ConsumerWidget {
                     ),
                   ),
                 const SizedBox(height: 4),
-                const Text(
+                Text(
                   'Of a full battery. The screen is measured from the drain; the others are estimated from how long '
-                  'they were on and their typical draw (a ~350 mAh battery).',
-                  style: TextStyle(color: AppColors.textFaint, fontSize: 11.5),
+                  'they were on and their typical draw (a $mah mAh battery - change it in the battery profiler).',
+                  style: const TextStyle(color: AppColors.textFaint, fontSize: 11.5),
                 ),
               ],
             ),
           ),
+          const SizedBox(height: 10),
+        ],
+        if (u.profile != null) ...[
+          const SectionLabel('Battery profiler, today'),
+          _ProfilerCard(u, mah),
           const SizedBox(height: 10),
         ],
         if (shares.isNotEmpty) ...[
@@ -410,4 +416,146 @@ class _HoursChart extends CustomPainter {
 
   @override
   bool shouldRepaint(_HoursChart o) => o.on != on;
+}
+
+/// Diagnostics: the watch's own measurement (power_profile.cpp) - with the
+/// screen off or on, how much of the time it slept, what held it awake,
+/// and the drain shared out over the features (mA from the measured drain
+/// and the battery's capacity).
+class _ProfilerCard extends ConsumerStatefulWidget {
+  final WatchUsage usage;
+  final int mah;
+  const _ProfilerCard(this.usage, this.mah);
+  @override
+  ConsumerState<_ProfilerCard> createState() => _ProfilerCardState();
+}
+
+class _ProfilerCardState extends ConsumerState<_ProfilerCard> {
+  bool _on = false; // false: screen off
+
+  Future<void> _editBattery() async {
+    final ctl = TextEditingController(text: '${widget.mah}');
+    final v = await showDialog<int>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Watch battery'),
+        content: TextField(
+          controller: ctl,
+          autofocus: true,
+          keyboardType: TextInputType.number,
+          decoration: const InputDecoration(suffixText: 'mAh', helperText: 'The capacity printed on the cell'),
+          onSubmitted: (t) => Navigator.pop(ctx, int.tryParse(t.trim())),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          TextButton(onPressed: () => Navigator.pop(ctx, int.tryParse(ctl.text.trim())), child: const Text('Save')),
+        ],
+      ),
+    );
+    if (v != null) await ref.read(watchBatteryMahProvider.notifier).set(v);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final p = widget.usage.profile!;
+    final w = _on ? p.on : p.off;
+    final rates = widget.usage.drainRates();
+    final pctH = rates == null ? null : (_on ? rates.on : rates.off);
+    final mA = pctH == null ? null : pctH / 100 * widget.mah;
+    final rows = w == null ? const <DrainShare>[] : PowerProfile.breakdown(w, measuredMa: mA);
+    String dur(int s) => s >= 3600 ? '${s ~/ 3600}h ${(s % 3600 ~/ 60).toString().padLeft(2, '0')}m' : '${s ~/ 60}m';
+    return Panel(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SegmentedButton<bool>(
+            segments: const [
+              ButtonSegment(value: false, label: Text('Screen off')),
+              ButtonSegment(value: true, label: Text('Screen on')),
+            ],
+            selected: {_on},
+            onSelectionChanged: (v) => setState(() => _on = v.first),
+          ),
+          const SizedBox(height: 12),
+          if (w == null)
+            Text(
+              _on ? 'No screen-on time measured yet today' : 'No screen-off time measured yet today',
+              style: const TextStyle(color: AppColors.textDim),
+            )
+          else ...[
+            Text(
+              [
+                '${dur(w.seconds)} measured',
+                if (w.sleepPermille != null) 'asleep ${(w.sleepPermille! / 10).round()}% of it',
+                if (mA != null) 'about ${mA.toStringAsFixed(mA < 10 ? 1 : 0)} mA (${pctH!.toStringAsFixed(1)}%/h)',
+              ].join(' · '),
+              style: const TextStyle(fontWeight: FontWeight.w600),
+            ),
+            if (w.locks.isNotEmpty) ...[
+              const SizedBox(height: 6),
+              Text(
+                'Held awake: ${[for (final (n, pm) in w.locks.take(4)) '${PowerProfile.lockLabel(n)} ${(pm / 10).round()}%'].join(', ')}',
+                style: const TextStyle(color: AppColors.textDim, fontSize: 12.5),
+              ),
+            ],
+            const SizedBox(height: 10),
+            for (final r in rows)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 5),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(r.label, style: const TextStyle(fontWeight: FontWeight.w600)),
+                        ),
+                        Text(
+                          r.mA != null
+                              ? '${r.mA!.toStringAsFixed(r.mA! < 10 ? 1 : 0)} mA · ${(r.share * 100).round()}%'
+                              : '${(r.share * 100).round()}%',
+                          style: const TextStyle(fontWeight: FontWeight.w600),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 3),
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(4),
+                      child: LinearProgressIndicator(
+                        value: r.share,
+                        minHeight: 6,
+                        backgroundColor: AppColors.surfaceHigh,
+                        color: r.label == 'Asleep'
+                            ? AppColors.success
+                            : r.label.startsWith('Awake')
+                            ? AppColors.danger
+                            : AppColors.warning,
+                      ),
+                    ),
+                    if (r.detail.isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 2),
+                        child: Text(r.detail, style: const TextStyle(color: AppColors.textDim, fontSize: 12)),
+                      ),
+                  ],
+                ),
+              ),
+          ],
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  'Measured on the watch: time asleep, power locks and CPU per task. The mA are the measured drain '
+                  'shared out by typical draw - estimates, for a ${widget.mah} mAh battery.',
+                  style: const TextStyle(color: AppColors.textFaint, fontSize: 11.5),
+                ),
+              ),
+              TextButton(onPressed: _editBattery, child: const Text('Battery size')),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
 }
