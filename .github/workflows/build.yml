@@ -320,6 +320,9 @@ jobs:
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
+          # pinned: Flutter 3.50's Gradle plugin needs Android Gradle Plugin 9
+          # (the app is on 8.11) - move both up together
+          flutter-version: 3.47.9
           cache: true
 
       # The app pins an NDK (android/app/build.gradle.kts ndkVersion) that the
@@ -434,6 +437,9 @@ jobs:
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
+          # pinned: Flutter 3.50's Gradle plugin needs Android Gradle Plugin 9
+          # (the app is on 8.11) - move both up together
+          flutter-version: 3.47.9
           cache: true
 
       - run: flutter pub get
