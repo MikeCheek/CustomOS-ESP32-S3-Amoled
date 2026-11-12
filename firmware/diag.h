@@ -17,7 +17,7 @@
 #include <stdint.h>
 
 // Bump on every release; the companion app shows it and OTA compares it.
-#define FW_VERSION "3.4.1"
+#define FW_VERSION "3.5.0"
 
 void diag_boot();            // early in setup(), after nvs_init()
 void diag_after_storage();   // after sd_init() and ui_init(): SD copy + toast

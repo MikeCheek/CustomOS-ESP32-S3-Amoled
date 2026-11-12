@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../providers/usage_provider.dart';
+import '../widgets/battery_tracker_card.dart';
 import '../widgets/watch_usage_card.dart';
 import 'package:permission_handler/permission_handler.dart';
 import '../providers/ble_provider.dart';
@@ -114,6 +115,8 @@ class _DiagnosticsScreenState extends ConsumerState<DiagnosticsScreen> with Widg
           if ((link.watchSystem ?? '').isNotEmpty) ...[const SizedBox(height: 10), _MonoBlock(text: link.watchSystem!)],
           const SectionLabel('Usage & battery'),
           const WatchUsageSection(),
+          const SectionLabel('Battery by feature'),
+          const BatteryTrackerSection(),
           SectionLabel(
             'Last crash',
             trailing: crash.isNotEmpty

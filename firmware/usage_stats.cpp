@@ -10,6 +10,7 @@
 #include "app_wallet.h"
 #include "app_camera.h"
 #include "hal_ble.h"
+#include "hal_display.h"
 #include "hal_power.h"
 #include "hal_rtc.h"
 #include "hal_sd.h"
@@ -25,6 +26,7 @@
 #include <Preferences.h>
 #include <esp_heap_caps.h>
 #include <string.h>
+#include <mbedtls/base64.h>
 
 static const int BAT_N = 144;                 // 24 h at one sample every 10 minutes
 static uint8_t s_bat[BAT_N];                  // oldest first, 255 = none
@@ -48,6 +50,7 @@ static uint32_t s_aw[AW_N];
 static uint32_t s_off_s = 0;   // seconds with the screen off today (unplugged)
 static uint32_t s_slept_ms = 0; // ...of which the chip was in light sleep (PlatformIO build)
 static uint64_t s_slept_mark = 0;
+static uint32_t s_en_cur_bright_acc = 0;   // brightness carried between seconds (energy log)
 
 // The last 7 days, newest first (part 4): kept with the rest in the store.
 struct DaySum { uint32_t date; uint16_t on_min, wakes; uint8_t drop, charges; uint16_t pad; };
@@ -70,7 +73,85 @@ struct UsageFile {
 };
 static const uint32_t USAGE_MAGIC = 0x31475355;   // "USG1"
 
-void usage_count_notification() { s_ntf++; }
+// ---- Energy log: what was on, every 10 minutes ------------------------------------
+// The PMU has no current sensor, so the battery's use per feature is worked
+// out on the phone: each 10-minute slot records the battery (gauge % and
+// voltage) and how many seconds each power-hungry thing was on; the app
+// fits a current to each from many slots (watch_usage / battery_tracker).
+enum EnergyFeat {
+    EF_SCREEN,      // screen on, seconds
+    EF_BRIGHT,      // screen on x brightness/255: full-brightness-equivalent seconds
+    EF_AWAKE_OFF,   // screen off with the chip awake (not light-sleeping)
+    EF_SLEEP,       // screen off, light-sleeping
+    EF_BLE_CONN,    // Bluetooth connected
+    EF_BLE_ADV,     // Bluetooth on, advertising (phone away)
+    EF_WIFI,
+    EF_GPS,
+    EF_SPEAKER,     // playing sound
+    EF_MIC,         // microphone in use: recording, wake word, I2S left on
+    EF_AOD,         // always-on clock (screen off)
+    EF_ESPNOW,
+    EF_NOTIF,       // notifications received (count)
+    EF_WAKES,       // screen wake-ups (count)
+    EF_N
+};
+struct EnergySlot {
+    uint16_t mv;        // battery voltage at the end of the slot, 0 = empty slot
+    uint8_t pct;        // gauge % at the end (255 = unknown)
+    uint8_t flags;      // bit0: plugged in at some point, bit1: starts after a restart
+    uint16_t s[EF_N];
+};
+static_assert(sizeof(EnergySlot) == 32, "the app decodes 32-byte slots");
+static const int EN_N = 144;                  // 24 h
+static EnergySlot *s_en = nullptr;            // PSRAM ring, oldest first
+static EnergySlot s_en_cur = {};              // the slot being filled
+static bool s_en_restart = true;
+struct EnergyFile { uint32_t magic; uint16_t n, feats; EnergySlot slot[EN_N]; };
+static const uint32_t ENERGY_MAGIC = 0x31474e45;   // "ENG1"
+
+static inline void en_add(int f, uint32_t v = 1) {
+    uint32_t x = s_en_cur.s[f] + v;
+    s_en_cur.s[f] = x > 65535 ? 65535 : (uint16_t)x;
+}
+
+static void energy_save() {
+    if (!s_en || !store_ok()) return;
+    EnergyFile *f = (EnergyFile *)heap_caps_malloc(sizeof(EnergyFile), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!f) return;
+    f->magic = ENERGY_MAGIC;
+    f->n = EN_N;
+    f->feats = EF_N;
+    memcpy(f->slot, s_en, sizeof(EnergySlot) * EN_N);
+    store_write("energy", f, sizeof(EnergyFile));
+    heap_caps_free(f);
+}
+
+static void energy_init() {
+    s_en = (EnergySlot *)heap_caps_calloc(EN_N, sizeof(EnergySlot), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!s_en || !store_ok() || store_size("energy") != (int)sizeof(EnergyFile)) return;
+    EnergyFile *f = (EnergyFile *)heap_caps_malloc(sizeof(EnergyFile), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!f) return;
+    if (store_read("energy", f, sizeof(EnergyFile)) == (int)sizeof(EnergyFile) && f->magic == ENERGY_MAGIC &&
+        f->n == EN_N && f->feats == EF_N)
+        memcpy(s_en, f->slot, sizeof(EnergySlot) * EN_N);
+    heap_caps_free(f);
+}
+
+// The 10-minute tick: close the current slot.
+static void energy_close_slot(int pct, bool charging) {
+    if (!s_en) return;
+    PowerStatus ps = power_read();
+    s_en_cur.mv = ps.valid && ps.battery_voltage_v > 2.5f ? (uint16_t)(ps.battery_voltage_v * 1000) : 1;
+    s_en_cur.pct = pct < 0 ? 255 : (uint8_t)pct;
+    if (charging) s_en_cur.flags |= 1;
+    if (s_en_restart) s_en_cur.flags |= 2;
+    s_en_restart = false;
+    memmove(s_en, s_en + 1, sizeof(EnergySlot) * (EN_N - 1));
+    s_en[EN_N - 1] = s_en_cur;
+    memset(&s_en_cur, 0, sizeof(s_en_cur));
+}
+
+void usage_count_notification() { s_ntf++; en_add(EF_NOTIF); }
 
 static void save() {
     s_last_save_ms = millis();
@@ -113,6 +194,7 @@ static void save() {
 
 void usage_init() {
     memset(s_bat, 255, sizeof(s_bat));
+    energy_init();
     if (store_size("usage") == (int)sizeof(UsageFile)) {
         UsageFile *f = (UsageFile *)heap_caps_malloc(sizeof(UsageFile), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
         if (f && store_read("usage", f, sizeof(UsageFile)) == (int)sizeof(UsageFile) && f->magic == USAGE_MAGIC) {
@@ -211,7 +293,7 @@ void usage_update() {
         screen_name(name, sizeof(name));
         add_app_time(name);
     }
-    if (s_was_asleep && !asleep) { s_wakes++; if (s_wk[h] < 255) s_wk[h]++; }
+    if (s_was_asleep && !asleep) { s_wakes++; if (s_wk[h] < 255) s_wk[h]++; en_add(EF_WAKES); }
     static bool plugged = false;
     static uint32_t plugged_ms = 0;
     if (!plugged_ms || ms - plugged_ms > 10000) { plugged_ms = ms ? ms : 1; plugged = power_vbus_present(); }   // the PMU, every 10 s
@@ -221,6 +303,30 @@ void usage_update() {
         uint64_t d = sl - s_slept_mark;
         s_slept_mark = sl;
         if (asleep && !plugged) s_slept_ms += (uint32_t)((d > 2000000ULL ? 2000000ULL : d) / 1000);
+        // the energy log: this second, what was on
+        if (!asleep) {
+            en_add(EF_SCREEN);
+            s_en_cur_bright_acc += display_get_brightness();
+            if (s_en_cur_bright_acc >= 255) { en_add(EF_BRIGHT, s_en_cur_bright_acc / 255); s_en_cur_bright_acc %= 255; }
+        } else {
+            bool slept = power_auto_sleep_available() ? d >= 500000ULL : false;
+            en_add(slept ? EF_SLEEP : EF_AWAKE_OFF);
+            if (g_app_settings.aod_on) en_add(EF_AOD);
+        }
+        if (ble_is_connected()) en_add(EF_BLE_CONN);
+        else if (ble_is_enabled()) en_add(EF_BLE_ADV);
+#if FEATURE_WIFI
+        if (wifi_is_enabled()) en_add(EF_WIFI);
+#endif
+#if FEATURE_GPS
+        if (gps_is_enabled()) en_add(EF_GPS);
+#endif
+#if FEATURE_AUDIO
+        if (audio_is_playing()) en_add(EF_SPEAKER);
+        else if (audio_is_recording() || voice_wake_state() == VW_LISTENING || audio_hw_running()) en_add(EF_MIC);
+#endif
+        if (espnow_is_enabled()) en_add(EF_ESPNOW);
+        if (plugged) s_en_cur.flags |= 1;
     }
     if (asleep && !plugged) {
         s_off_s++;
@@ -259,8 +365,9 @@ void usage_update() {
         uint8_t a = s_bat[BAT_N - 2], b = s_bat[BAT_N - 1];
         if (a != 255 && b != 255 && !s_chg[BAT_N - 1] && !s_chg[BAT_N - 2] && b < a && s_drop_today < 250) s_drop_today += a - b;
         if (s_chg[BAT_N - 1] && !s_chg[BAT_N - 2] && s_charges_today < 255) s_charges_today++;
+        energy_close_slot(pct, s_chg[BAT_N - 1]);
     }
-    if (ms - s_last_save_ms > 3600000UL) save();
+    if (ms - s_last_save_ms > 3600000UL) { save(); energy_save(); }
 }
 
 // The average drain over the unplugged part of the last 24 hours, %/hour
@@ -342,6 +449,26 @@ void usage_send() {
         for (int i = 0; i < AW_N; i++)
             if (s_aw[i]) aw[AW_KEYS[i]] = s_aw[i];
         phone_link_send(d);
+    }
+    if (s_en) {
+        // the energy log, 10 slots a message, oldest first: base64 of EnergySlot
+        // (little-endian: u16 mV, u8 %, u8 flags, then EF_N u16), "f" = EF_N
+        const int PER = 10;
+        int first = 0;
+        while (first < EN_N && s_en[first].mv == 0) first++;   // empty before the log began
+        int total = (EN_N - first + PER - 1) / PER;
+        for (int k = 0; k < total; k++) {
+            int a = first + k * PER, n = EN_N - a < PER ? EN_N - a : PER;
+            unsigned char b64[((PER * sizeof(EnergySlot) + 2) / 3) * 4 + 4];
+            size_t olen = 0;
+            if (mbedtls_base64_encode(b64, sizeof(b64), &olen, (const unsigned char *)&s_en[a], n * sizeof(EnergySlot)) != 0) break;
+            b64[olen] = 0;
+            JsonDocument d;
+            d["e"] = "usage"; d["p"] = 5;
+            d["k"] = k; d["n"] = total; d["f"] = EF_N; d["iv"] = 10;
+            d["d"] = (const char *)b64;
+            phone_link_send(d);
+        }
     }
     {
         // the last 7 days: [yyyymmdd, screen-on min, wake-ups, battery % used unplugged, charges]
