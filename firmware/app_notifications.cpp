@@ -1,4 +1,5 @@
 #include "app_notifications.h"
+#include "psram_static.h"
 #include "store.h"
 #include "dnd.h"
 #include "config.h"
@@ -141,15 +142,21 @@ void notifications_mute_app(const char *app, bool on) {
 }
 uint32_t notifications_unread() { return s_unread; }
 
-static void toast_for(const NotifHistoryItem &it) {
+// quiet: the phone judged it not worth a buzz (promotions, busy group chats):
+// it goes into the list and Catch me up, without a toast or a vibration.
+static void toast_for(const NotifHistoryItem &it, bool quiet) {
     s_unread++;
     usage_count_notification();
-    if (dnd_active() || notifications_app_muted(it.source)) return;
+    if (quiet || dnd_active() || notifications_app_muted(it.source)) return;
     haptic(HAP_NOTIFY);
+    if (it.icon) phone_icon(it.icon);   // ask now, so it's likely there by the next frame
+    if (notif_mode() == NM_ICON) {      // just the app's icon (Settings, the control panel...)
+        ui_show_toast_badge(it.icon, it.source, 2500);
+        return;
+    }
     char t[96];
     if (it.title[0]) snprintf(t, sizeof(t), "%s: %s", it.title, it.text);
     else snprintf(t, sizeof(t), "%s", it.text);
-    if (it.icon) phone_icon(it.icon);   // ask now, so it's likely there by the next frame
     ui_show_toast_icon(t, 3500, it.icon);
 }
 
@@ -161,7 +168,7 @@ static NotifHistoryItem &next_slot() {
 }
 
 void notifications_add(uint32_t id, const char *app, const char *title, const char *text, bool can_reply,
-                       uint32_t icon) {
+                       uint32_t icon, bool quiet) {
     if (!s_history) return;
     // An update of a notification we already have (chat with new message)
     // replaces it in place instead of filling the list with copies.
@@ -177,7 +184,7 @@ void notifications_add(uint32_t id, const char *app, const char *title, const ch
                 it.received_ms = millis();
                 if (icon) it.icon = icon;
                 s_revision++;
-                toast_for(it);
+                toast_for(it, quiet);
                 return;
             }
         }
@@ -194,7 +201,7 @@ void notifications_add(uint32_t id, const char *app, const char *title, const ch
     it.received_ms = millis();
     it.icon = icon;
     s_revision++;
-    toast_for(it);
+    toast_for(it, quiet);
 }
 
 // Rebuilds the ring without entry `idx` (0 = newest) - for the plain-text
@@ -271,7 +278,7 @@ void notifications_update() {
         it.received_ms = millis();
         it.icon = 0;
         s_revision++;
-        toast_for(it);
+        toast_for(it, false);
     }
 }
 
@@ -382,6 +389,7 @@ static View     s_view = V_LIST;
 static UiScroll s_scroll;
 static bool     s_prev = false, s_back = false;
 static int      s_press = -1;
+static uint32_t s_hold_ms = 0;   // when the message was pressed (held: read aloud)
 static uint32_t s_seen_rev = 0;
 
 // The list starts lower when "Catch me up" sits above it, clear of the title.
@@ -393,7 +401,7 @@ static int list_top() {
 // (tap to fan them out), each row swipes left to clear, "Clear all" ends it.
 enum RowKind : uint8_t { R_ITEM, R_STACK, R_HEADER, R_CLEAR };
 struct Row { RowKind kind; int8_t idx; uint8_t n; int16_t y, h; };
-static Row  s_rows[NOTIF_HISTORY_SIZE * 2 + 2];
+PS_ARRAY(Row, s_rows, [NOTIF_HISTORY_SIZE * 2 + 2]);
 static int  s_row_n = 0;
 static char s_expanded[32] = "";   // the app fanned out
 static int  s_swipe_row = -1;      // the row following the finger sideways
@@ -501,7 +509,7 @@ static void ago(uint32_t ms, char *out, size_t n) {
 // Returns the y after the last line.
 static int draw_wrapped(Arduino_GFX *g, const char *text, int y, int width_px, int size, uint16_t color, int max_lines) {
     (void)g;
-    int lh = 8 * size + 8;
+    int lh = ui_line_height(size, 8 * size + 8);
     const char *p = text;
     char line[120];
     int lines = 0;
@@ -691,6 +699,13 @@ static void draw_detail(Arduino_GFX *g) {
         }
         g->fillRoundRect(x0, s_btn_y, w, 50, 25, s_press == 101 ? COLOR_TEXT : COLOR_PANEL);
         ui_text_center(x0 + w / 2, s_btn_y + 25, s_press == 101 ? COLOR_BG : COLOR_TEXT, "Dismiss", 2);
+        if (s_btn_y + 72 < LCD_HEIGHT - 26 && phone_link_active())
+            ui_text_center(CX, s_btn_y + 72, COLOR_TEXT_DIM, "Hold the message to hear it", 1);
+        // held: a ring fills until it's read aloud
+        if (s_press == 104) {
+            float f = (millis() - s_hold_ms) / 450.0f;
+            ui_edge_ring(0, 360.0f * (f > 1 ? 1 : f), COLOR_ACCENT2, 4, 6, true);
+        }
     } else {
         ui_text_center(CX, s_btn_y + 25, COLOR_TEXT_DIM, "Update the companion app for actions", 1);
     }
@@ -701,7 +716,10 @@ static void draw_digest(Arduino_GFX *g) {
     ui_text_center(CX, 84 + off, COLOR_ACCENT2, "Catch me up", 2);
     const char *t = s_digest_wait ? "Summarizing on your phone..." : (s_digest && s_digest[0] ? s_digest : "");
     if (s_digest_wait && millis() - s_ask_ms > 90000) t = "No answer from the phone";
-    draw_wrapped(g, t, 120 + off, 330, 2, COLOR_TEXT, 14);
+    // done: a tap has the phone say it on the watch's speaker
+    bool done = !s_digest_wait && s_digest && s_digest[0] && phone_link_active();
+    if (done) ui_text_center(CX, 106 + off, COLOR_TEXT_DIM, "Tap to hear it", 1);
+    draw_wrapped(g, t, (done ? 128 : 120) + off, 330, 2, COLOR_TEXT, 14);
 }
 
 static void draw_reply(Arduino_GFX *g) {
@@ -766,6 +784,8 @@ static void notifications_touch(int x, int y, bool pressed) {
                 int xd = two ? x0 + w + gap : x0;
                 if (x >= xd && x <= xd + w) s_press = 101;
             }
+            // hold the message: the phone reads it aloud on the watch
+            if (s_open.id && y > 60 && y < s_btn_y - 52) { s_press = 104; s_hold_ms = millis(); }
             if (y >= s_btn_y - 48 && y <= s_btn_y - 8) {
                 bool translated = s_tr && s_tr_id == s_open.id && s_open.id && (s_tr_wait || s_tr[0]);
                 bool tr = show_translate(translated);
@@ -777,7 +797,10 @@ static void notifications_touch(int x, int y, bool pressed) {
         if (!pressed && s_press >= 0) {
             int p = s_press;
             s_press = -1;
-            if (p == 103) {
+            if (p == 104) {
+                if (millis() - s_hold_ms >= 450)
+                    ui_show_toast(phone_link_say("notif", s_open.id) ? "Reading it on the watch" : "Phone not reachable", 1500);
+            } else if (p == 103) {
                 bool m = !notifications_app_muted(s_open.source);
                 notifications_mute_app(s_open.source, m);
                 char b[64];
@@ -861,7 +884,8 @@ static void notifications_touch(int x, int y, bool pressed) {
                 enter(V_DIGEST);
             }
         } else if (s_view == V_DIGEST) {
-            // nothing to tap
+            if (!s_digest_wait && s_digest && s_digest[0])
+                ui_show_toast(phone_link_say("digest") ? "Saying it on the watch" : "Phone not reachable", 1500);
         } else if (s_view == V_LIST) {
             if (p == 300) {
                 notifications_clear_all();

@@ -38,6 +38,12 @@ UiFont ui_font_for_size(int size) {
 
 int ui_font_cap_height(UiFont f) { return FONTS[f]->cap; }
 
+int ui_line_height(int size, int min) {
+    const UiFontData *f = FONTS[ui_font_for_size(size)];
+    int h = f->ascent + f->descent / 2 + 4;
+    return h > min ? h : min;
+}
+
 // ---- UTF-8 -------------------------------------------------------------------
 
 static uint32_t next_cp(const char *&p) {

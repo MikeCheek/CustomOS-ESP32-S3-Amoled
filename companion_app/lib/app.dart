@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'providers/settings_provider.dart';
 import 'screens/onboarding_screen.dart';
@@ -88,8 +89,43 @@ class _RootShellState extends State<RootShell> {
     (Icons.settings_outlined, Icons.settings_rounded, 'Settings'),
   ];
 
+  DateTime? _backAt; // the first back on Home, waiting for the second
+
+  /// Back with no screen left to close: another tab goes Home; on Home the
+  /// first back says so, a second within 2 seconds closes the app.
+  void _onBack() {
+    if (_tab != 0) {
+      selectTab(0);
+      return;
+    }
+    final now = DateTime.now();
+    if (_backAt != null && now.difference(_backAt!) < const Duration(seconds: 2)) {
+      ScaffoldMessenger.of(context).hideCurrentSnackBar();
+      SystemNavigator.pop();
+      return;
+    }
+    _backAt = now;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        const SnackBar(
+          content: Text('Press back again to close the app'),
+          behavior: SnackBarBehavior.floating,
+          duration: Duration(seconds: 2),
+        ),
+      );
+  }
+
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => PopScope(
+    canPop: false, // the tabs handle back themselves (_onBack)
+    onPopInvokedWithResult: (didPop, _) {
+      if (!didPop) _onBack();
+    },
+    child: _shell(context),
+  );
+
+  Widget _shell(BuildContext context) {
     final pages = IndexedStack(
       index: _tab,
       // Tabs are built the first time they're opened, then kept alive.

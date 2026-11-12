@@ -23,6 +23,8 @@
 #include "hal_rtc.h"
 #include "hal_sleep.h"
 #include "hal_touch.h"
+#include "dnd.h"
+#include "haptics.h"
 #include <Arduino_GFX_Library.h>
 #include <math.h>
 #include <string.h>
@@ -258,6 +260,29 @@ static void draw_battery(int cx) {
     }
 }
 
+// Notifications: how they show now, a tap for the next step (dnd.h)
+static void draw_notif(int cx) {
+    NotifMode m = dnd_bedtime_now() ? NM_SILENT : notif_mode();
+    uint16_t c = m == NM_SILENT ? COLOR_ACCENT3 : (m == NM_ICON ? COLOR_ACCENT2 : COLOR_ACCENT);
+    title(cx, c, "NOTIFICATIONS");
+    Arduino_GFX *g = ui_gfx();
+    int cy = CY - 40;
+    g->fillCircle(cx, cy, 62, ui_dim(c, 0.25f));
+    if (m == NM_SILENT) {                                  // a moon
+        g->fillCircle(cx, cy, 30, c);
+        g->fillCircle(cx + 18, cy - 14, 26, ui_dim(c, 0.25f));
+    } else {                                               // a bell
+        g->fillCircle(cx, cy - 6, 24, c);
+        g->fillRect(cx - 24, cy - 6, 49, 22, c);
+        g->fillRoundRect(cx - 32, cy + 14, 65, 9, 4, c);
+        g->fillCircle(cx, cy + 30, 6, c);
+        if (m == NM_ICON) g->fillCircle(cx + 28, cy - 26, 10, COLOR_TEXT);
+    }
+    ui_text_center(cx, CY + 52, COLOR_TEXT, dnd_bedtime_now() && !dnd_manual() ? "Bedtime" : notif_mode_name(m), 3);
+    ui_text_center(cx, CY + 92, COLOR_TEXT_DIM, notif_mode_hint(m), 1);
+    ui_text_center(cx, CY + 126, COLOR_TEXT_DIM, "Tap for the next", 1);
+}
+
 static void draw_tile(int k, int cx) {
     switch (k) {
     case TL_ACTIVITY:  draw_activity(cx); break;
@@ -270,6 +295,7 @@ static void draw_tile(int k, int cx) {
     case TL_ALARM:     draw_alarm(cx); break;
     case TL_REMINDERS: draw_reminders(cx); break;
     case TL_BATTERY:   draw_battery(cx); break;
+    case TL_NOTIF:     draw_notif(cx); break;
     }
 }
 
@@ -297,6 +323,12 @@ static void tile_tap(int k, int x, int y) {
         if (in_circle(x, y, CX - MB_DX, MB_Y, 40)) { phone_link_media_cmd("prev"); return; }
         if (in_circle(x, y, CX, MB_Y, 50)) { phone_link_media_cmd("toggle"); return; }
         if (in_circle(x, y, CX + MB_DX, MB_Y, 40)) { phone_link_media_cmd("next"); return; }
+    }
+    if (k == TL_NOTIF) {
+        if (dnd_bedtime_now() && !dnd_manual()) { ui_show_toast("Bedtime - change it in Settings", 1500); return; }
+        notif_mode_next();
+        haptic(HAP_SUCCESS);
+        return;
     }
     if (k == TL_TIMER) {
         if (assistant_timer_active()) {

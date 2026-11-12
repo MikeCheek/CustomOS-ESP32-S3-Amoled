@@ -9,3 +9,6 @@ void menu_draw_app_icon(const Screen *screen, int cx, int cy, int r);
 
 // Opens a folder of the app menu (0 = Games), as tapping it would.
 void menu_open_folder(int category);
+
+// The folder the menu's field shows (-1: the top level) - for the self-tests.
+int menu_view_folder();

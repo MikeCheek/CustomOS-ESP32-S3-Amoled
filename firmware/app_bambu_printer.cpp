@@ -32,6 +32,7 @@
  * release.
  */
 #include "clock_fmt.h"
+#include "psram_static.h"
 #include <new>
 #include "app_bambu_printer.h"
 #include "config.h"
@@ -80,7 +81,7 @@ static int s_cam_pix_w = 0, s_cam_pix_h = 0; // since the display clears every f
 
 // Files (FTPS browser)
 #define FILES_MAX 30
-static BambuFileEntry s_files[FILES_MAX];
+PS_ARRAY(BambuFileEntry, s_files, [FILES_MAX]);
 static int s_files_count = -2; // -2 = never loaded, -1 = load failed, >=0 = entry count
 static char s_files_dir[64] = "";
 static bool s_files_pending_load = false; // draw "Loading..." for one frame before the blocking fetch runs

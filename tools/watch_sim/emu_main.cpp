@@ -15,6 +15,9 @@
 // ESP-SR (chip-only libraries).
 #include "store.h"
 #include "game_roulette.h"
+#include "game_videopoker.h"
+#include "game_dice.h"
+#include "app_menu.h"
 #include "casino_wallet.h"
 #include <SD.h>
 #include "game_audio.h"
@@ -467,6 +470,137 @@ __attribute__((visibility("default"))) int emu_selftest() {
         tiles_defaults(g_app_settings.tiles);
         pop_all(m, sizeof(m), "\"e\":\"home\"");
     }
+    // ---- the app menu: a game opened from a folder, then back twice
+    {
+        ui_go_home();
+        ui_push(&menu_screen);
+        emu_step();
+        menu_open_folder(0);   // Games
+        emu_step();
+        check(menu_view_folder() == 0 && ui_active_screen() != &menu_screen, "menu: the Games folder opens");
+        ui_push(&dice_screen);   // a game, opened from the folder
+        emu_step();
+        ui_pop_screen();
+        for (uint32_t t0 = millis(); millis() - t0 < 300;) { emu_step(); delay(20); }
+        check(menu_view_folder() == 0 && ui_active_screen() != &menu_screen, "menu: back from a game, still in the folder");
+        ui_pop_screen();
+        for (uint32_t t0 = millis(); millis() - t0 < 300;) { emu_step(); delay(20); }   // its next frames
+        check(menu_view_folder() == -1 && ui_active_screen() == &menu_screen, "menu: back again, the top level");
+        ui_go_home();
+        emu_step();
+    }
+    // ---- the assistant: a follow-up after a spoken answer, speech asked for
+    {
+        bool was = g_sim.phone;
+        emu_set_connected(1);
+        emu_link_push("{\"t\":\"hi\"}");
+        emu_step();
+        pop_all(m, sizeof(m), "\"e\"");
+        auto run = [](int ms, int mic) {
+            sim_set_mic_level(mic);
+            uint32_t t0 = millis();
+            while (millis() - t0 < (uint32_t)ms) { emu_step(); delay(20); }
+        };
+        auto speak = [&]() { run(400, 5); run(700, 60); run(1700, 5); };   // the room, a few words, a pause
+        auto seq_of = [](const char *msg) { JsonDocument d; deserializeJson(d, msg); return (int)(d["n"] | 0); };
+        auto answer = [&](int n, bool follow) {
+            char r[160];
+            snprintf(r, sizeof(r), "{\"t\":\"ask\",\"n\":%d,\"q\":\"Weather?\",\"a\":\"Sunny all day.\",\"sp\":1%s}", n,
+                     follow ? ",\"fl\":1" : "");
+            emu_link_push(r);
+            run(150, 5);
+        };
+        auto said = [&]() { sim_set_playing(true); run(250, 5); sim_set_playing(false); run(250, 5); };
+
+        ui_push(&assistant_screen);
+        speak();
+        check(pop_all(m, sizeof(m), "\"e\":\"ask\"") == 1 && !strstr(m, "\"fu\""), "assistant: the question goes to the phone");
+        answer(seq_of(m), true);
+        check(!audio_is_recording(), "assistant: no listening before the answer is said");
+        sim_set_playing(true);
+        run(250, 5);
+        check(!audio_is_recording(), "assistant: no listening while it's said");
+        sim_set_playing(false);
+        run(250, 5);
+        check(audio_is_recording(), "assistant: once said, it listens for a follow-up");
+        run(700, 60);
+        run(1700, 5);
+        check(pop_all(m, sizeof(m), "\"e\":\"ask\"") == 1 && strstr(m, "\"fu\":1"), "assistant: the follow-up is sent as one");
+        answer(seq_of(m), true);
+        said();
+        check(audio_is_recording(), "assistant: and listens again after that answer");
+        run(4500, 5);
+        check(!audio_is_recording() && pop_all(m, sizeof(m), "\"e\":\"ask\"") == 0,
+              "assistant: a follow-up nobody asks - back to the answer, nothing sent");
+        // follow-ups off on the phone: no listening after the answer
+        emu_touch(233, LCD_HEIGHT - 92, 1); emu_step(); emu_touch(233, LCD_HEIGHT - 92, 0);   // the mic
+        speak();
+        check(pop_all(m, sizeof(m), "\"e\":\"ask\"") == 1, "assistant: the mic asks again");
+        answer(seq_of(m), false);
+        said();
+        run(400, 5);
+        check(!audio_is_recording(), "assistant: without \"fl\" it doesn't listen by itself");
+        check(assistant_history_count() >= 3, "assistant: the answers are kept for the history");
+        ui_pop_screen();
+        emu_step();
+        // speech the watch asked for: played outside the assistant for a while
+        check(phone_link_say("notif", 7) && pop_all(m, sizeof(m), "\"e\":\"say\"") == 1 && strstr(m, "\"id\":7") &&
+                  assistant_speech_expected(), "assistant: a message to read aloud, and its speech expected");
+        phone_link_say("briefing", 0, "Good morning.");
+        check(pop_all(m, sizeof(m), "\"w\":\"briefing\"") == 1 && strstr(m, "Good morning."), "assistant: the briefing to say");
+        // the Today brief, for the face and the Smart Stack card
+        emu_link_push("{\"t\":\"brief\",\"v\":\"2\",\"l\":\"Prep the review\",\"x\":\"2 events left: Review at 15:00.\"}");
+        emu_step();
+        char head[40], line[120];
+        check(comp_brief(head, sizeof(head), line, sizeof(line)) && !strcmp(head, "Prep the review") &&
+                  !strcmp(line, "2 events left: Review at 15:00."), "today: the brief and its sentence arrive");
+        // the evening recap: kept for tonight's RECAP card, its speech expected
+        emu_link_push("{\"t\":\"recap\",\"x\":\"A calm day: two memos, one to-do left.\"}");
+        emu_step();
+        char rc[128];
+        check(comp_recap(rc, sizeof(rc)) && !strcmp(rc, "A calm day: two memos, one to-do left.") &&
+                  assistant_speech_expected(), "recap: kept for the card, and said");
+        // no phone: the watch's own quick actions, no recording
+        emu_set_connected(0);
+        assistant_timer_set(0);
+        ui_push(&assistant_screen);
+        for (int i = 0; i < 3; i++) emu_step();
+        check(!audio_is_recording(), "assistant offline: nothing recorded for a phone that isn't there");
+        emu_touch(233 - 156 + 75, 233 - 8 + 28, 1); emu_step(); emu_touch(233 - 156 + 75, 233 - 8 + 28, 0); emu_step();
+        check(assistant_timer_active() && assistant_timer_left_s() > 290 && assistant_timer_left_s() <= 300,
+              "assistant offline: Timer 5 min works without the phone");
+        assistant_timer_set(0);
+        ui_pop_screen();
+        emu_step();
+        sim_set_mic_level(0);
+        emu_set_connected(was);
+        if (was) {   // the link comes back as the app would bring it back
+            emu_link_push("{\"t\":\"hi\"}");
+            emu_step();
+            pop_all(m, sizeof(m), "\"e\"");
+        }
+    }
+    // ---- notifications: in full -> icon only -> silenced, from anywhere
+    {
+        bool was = g_sim.phone;
+        emu_set_connected(1);
+        notif_mode_set(NM_FULL);
+        pop_all(m, sizeof(m), "\"e\"");
+        check(notif_mode_next() == NM_ICON && !dnd_manual(), "notif mode: full -> icon only (not DND)");
+        check(pop_all(m, sizeof(m), "\"e\":\"nmode\"") == 1 && strstr(m, "\"m\":1"), "notif mode: the app is told");
+        check(notif_mode_next() == NM_SILENT && dnd_manual(), "notif mode: icon only -> silenced (DND on)");
+        check(notif_mode_next() == NM_FULL && !dnd_manual() && g_app_settings.notif_style == 0, "notif mode: -> in full again");
+        pop_all(m, sizeof(m), "\"e\"");   // what the steps above told the app
+        emu_link_push("{\"t\":\"nmode\",\"m\":1}");
+        emu_step();
+        check(notif_mode() == NM_ICON && pop_all(m, sizeof(m), "\"e\":\"nmode\"") == 0,
+              "notif mode: set from the app (not echoed back)");
+        home_run(HA_NOTIF_MODE);
+        check(notif_mode() == NM_SILENT, "notif mode: a home gesture steps it too");
+        notif_mode_set(NM_FULL);
+        pop_all(m, sizeof(m), "\"e\"");
+        emu_set_connected(was);
+    }
     // ---- the Casino: roulette pays, the shared wallet
     {
         int32_t out[9] = {}, num[37] = {};
@@ -477,6 +611,47 @@ __attribute__((visibility("default"))) int emu_selftest() {
         check(roulette_win(out, num, 30) == 30 && roulette_win(out, num, 12) == 0, "roulette: a dozen pays 2:1");
         out[8] = 0; num[17] = 5; num[0] = 5;           // straight up on 17 and on 0
         check(roulette_win(out, num, 17) == 180 && roulette_win(out, num, 0) == 180, "roulette: a number pays 35:1");
+        // video poker: the hands, with the ace low and high
+        auto ph = [](const char *cards) {   // "AS KS QS JS TS": rank then suit (S H D C)
+            uint8_t r[5], s[5];
+            for (int i = 0; i < 5; i++) {
+                const char *c = cards + i * 3;
+                const char *R = "A23456789TJQK", *S = "SHDC";
+                r[i] = (uint8_t)(strchr(R, c[0]) - R + 1);
+                s[i] = (uint8_t)(strchr(S, c[1]) - S);
+            }
+            return poker_hand(r, s);
+        };
+        check(ph("AS KS QS JS TS") == PH_ROYAL && poker_pays(PH_ROYAL) == 250, "poker: royal flush pays 250");
+        check(ph("9H 8H 7H 6H 5H") == PH_STRAIGHT_FLUSH, "poker: straight flush");
+        check(ph("AD 2C 3H 4S 5D") == PH_STRAIGHT && ph("TD JC QH KS AD") == PH_STRAIGHT, "poker: the ace low and high");
+        check(ph("QD KC AH 2S 3D") == PH_NOTHING, "poker: no wrapping round the ace");
+        check(ph("7S 7H 7D 7C 2S") == PH_FOUR && ph("7S 7H 7D 2C 2S") == PH_FULL_HOUSE, "poker: four of a kind, full house");
+        check(ph("2H 9H 4H JH KH") == PH_FLUSH && ph("5S 5H 5D 2C 9S") == PH_THREE, "poker: flush, three of a kind");
+        check(ph("5S 5H 9D 9C 2S") == PH_TWO_PAIR, "poker: two pair");
+        check(ph("JS JH 4D 9C 2S") == PH_JACKS && ph("AS AH 4D 9C 2S") == PH_JACKS, "poker: jacks or better");
+        check(ph("TS TH 4D 9C 2S") == PH_NOTHING && poker_pays(PH_NOTHING) == 0, "poker: a low pair pays nothing");
+        // hi-lo dice
+        check(dice_win(10, 0, 0, 6) == 20 && dice_win(10, 0, 0, 7) == 0, "dice: under 7 pays 1:1, not on 7");
+        check(dice_win(0, 10, 0, 7) == 50 && dice_win(0, 0, 10, 12) == 20 && dice_win(0, 0, 10, 7) == 0,
+              "dice: seven pays 4:1, over 7 pays 1:1");
+        // stats and the daily bonus
+        casino_stats_reset();
+        casino_record(CG_POKER, 20);
+        casino_record(CG_POKER, -5);
+        casino_record_poker_hand(PH_TWO_PAIR);
+        casino_record_poker_hand(PH_JACKS);   // worse: two pair stays the best
+        CasinoGameStats ps = casino_stats(CG_POKER);
+        check(ps.rounds == 2 && ps.net == 15 && ps.best == 20 && casino_best_poker_hand() == PH_TWO_PAIR,
+              "casino: stats per game and the best poker hand");
+        {
+            int32_t before = casino_credit();
+            check(casino_daily_bonus(20261106) == CASINO_DAILY_BONUS && casino_credit() == before + CASINO_DAILY_BONUS,
+                  "casino: the daily bonus");
+            check(casino_daily_bonus(20261106) == 0 && casino_daily_bonus_ready(20261107), "casino: once a day");
+            casino_set(before);
+        }
+        casino_stats_reset();
         int32_t keep = casino_credit();
         casino_set(3);
         check(casino_top_up() == CASINO_TOP_UP, "casino: the cashier tops up an empty wallet");
@@ -506,12 +681,18 @@ __attribute__((visibility("default"))) int emu_selftest() {
         check(tones() == 0, "sound: Notification sounds off - no tune");
         g_app_settings.sound_cues = true; g_app_settings.sfx_enabled = false;
         haptic(HAP_NOTIFY);
-        check(tones() == 0, "sound: All sounds off - no message tune");
+        check(tones() == 0, "sound: System sounds off - no message tune");
         game_sfx_score();
-        check(tones() == 0, "sound: All sounds off - no game effects");
+        check(tones() > 0, "sound: System sounds off - the games still play theirs");
         g_app_settings.sfx_enabled = true;
+        g_app_settings.music_enabled = false;
         game_sfx_score();
-        check(tones() > 0, "sound: game effects with All sounds on");
+        check(tones() == 0, "sound: Game sounds off - no game effects");
+        haptic(HAP_NOTIFY);
+        check(tones() > 0, "sound: Game sounds off - messages still play");
+        g_app_settings.music_enabled = true;
+        game_sfx_score();
+        check(tones() > 0, "sound: game effects with Game sounds on");
         // Game music: nothing while it's off, it starts when turned on, stops when off again
         SD.mkdir("/music");
         { File f = SD.open("/music/test.mp3", FILE_WRITE); if (f) { f.write((const uint8_t *)"ID3", 3); f.close(); } }
@@ -526,7 +707,7 @@ __attribute__((visibility("default"))) int emu_selftest() {
         g_app_settings.music_enabled = false;
         game_music_poll();
         check(!audio_is_playing(), "sound: Game music off mid-game - it stops");
-        // Breathe: a chime to start, notes as each breath turns - and none with All sounds off
+        // Breathe: a chime to start, notes as each breath turns - and none with System sounds off
         for (int pass = 0; pass < 2; pass++) {
             g_app_settings.sfx_enabled = pass == 0;
             tones();
@@ -539,7 +720,7 @@ __attribute__((visibility("default"))) int emu_selftest() {
             emu_step();
             printf("breathe pass %d: %d tones\n", pass, n);
             if (pass == 0) check(n >= 7, "sound: Breathe - a start chime and notes for in and out");
-            else check(n == 0, "sound: Breathe - silent with All sounds off");
+            else check(n == 0, "sound: Breathe - silent with System sounds off");
         }
         g_app_settings.sfx_enabled = true;
         game_music_stop();

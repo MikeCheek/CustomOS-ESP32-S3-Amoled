@@ -56,6 +56,7 @@ bool nvs_save_settings(const AppSettings &s) {
     s_prefs.putBool("music_on", s.music_enabled);
     s_prefs.putUChar("usb_mode", s.usb_mode);
     s_prefs.putBool("dnd_on", s.dnd_on);
+    s_prefs.putUChar("nstyle", s.notif_style);
     s_prefs.putBool("dnd_bed", s.dnd_bedtime);
     s_prefs.putUShort("dnd_from", s.dnd_from_min);
     s_prefs.putUShort("dnd_to", s.dnd_to_min);
@@ -154,6 +155,7 @@ bool nvs_load_settings(AppSettings &s) {
     s.music_enabled = s_prefs.getBool("music_on", true);
     s.usb_mode = s_prefs.getUChar("usb_mode", 1);
     s.dnd_on = s_prefs.getBool("dnd_on", false);
+    s.notif_style = s_prefs.getUChar("nstyle", 0) % 2;
     s.dnd_bedtime = s_prefs.getBool("dnd_bed", false);
     s.dnd_from_min = s_prefs.getUShort("dnd_from", 23 * 60);
     s.dnd_to_min = s_prefs.getUShort("dnd_to", 7 * 60);

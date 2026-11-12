@@ -235,6 +235,7 @@ static void settle() {
     s_won = roulette_win(s_out, s_num, s_result);
     s_credit += s_won;
     casino_set(s_credit);
+    casino_record(CG_ROULETTE, s_won - s_staked);
     memmove(s_hist + 1, s_hist, sizeof(s_hist) - 1);
     s_hist[0] = (uint8_t)s_result;
     if (s_hist_n < 10) s_hist_n++;
@@ -252,7 +253,7 @@ static void roulette_tick() {
     float rel = ball_angle(t) - wheel_angle(t);
     int fret = (int)floorf(rel / step);
     if (fret != s_last_fret) {
-        if (s_last_fret != -1 && g_app_settings.sfx_enabled && t > 0.35f) audio_play_sfx(2600, 6);
+        if (s_last_fret != -1 && game_sounds_on() && t > 0.35f) audio_play_sfx(2600, 6);
         s_last_fret = fret;
     }
     if (t >= 1) settle();

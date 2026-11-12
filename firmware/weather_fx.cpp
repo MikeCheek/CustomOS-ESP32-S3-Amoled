@@ -9,6 +9,7 @@
  * speed doesn't depend on the frame rate.
  */
 #include "weather_fx.h"
+#include "psram_static.h"
 #include "config.h"
 #include "board_pins.h"
 #include "app_settings_state.h"
@@ -28,7 +29,7 @@ enum WxKind : uint8_t {
 
 #define MAX_P 70
 struct Particle { float x, y, v, s, ph; };
-static Particle s_p[MAX_P];
+PS_ARRAY(Particle, s_p, [MAX_P]);
 static WxKind s_kind = WX_NONE, s_seeded = WX_NONE;
 static uint32_t s_parse_ms = 0, s_last_ms = 0;
 static uint32_t s_flash_until = 0, s_next_flash = 0;

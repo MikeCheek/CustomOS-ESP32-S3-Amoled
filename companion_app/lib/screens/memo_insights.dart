@@ -138,7 +138,7 @@ class InsightsView extends ConsumerWidget {
     final imp = kb.importanceHistogram();
     final tags = kb.tagCounts();
     final people = kb.people(n: 8);
-    final actions = kb.actions().where((a) => !done.contains(a.key)).toList();
+    final actions = ref.watch(todosProvider).where((a) => !done.contains(a.key)).toList();
     final processed = kb.entries.isEmpty ? 0 : (100 * kb.processedCount / kb.entries.length).round();
     final hours = kb.totalSeconds / 3600;
     final highlights = [...kb.entries.where((e) => e.importance >= 4 && e.summary.isNotEmpty)]
@@ -322,17 +322,80 @@ class InsightsView extends ConsumerWidget {
   }
 }
 
-/// A to-do from a memo, with a checkbox (kept on the phone).
+/// New wording for [todo], or (null) a new to-do. Returns once saved or cancelled.
+Future<void> editTodo(BuildContext context, WidgetRef ref, {Todo? todo}) async {
+  final ctl = TextEditingController(text: todo?.text ?? '');
+  final text = await showDialog<String>(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      title: Text(todo == null ? 'New to-do' : 'Edit to-do'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          TextField(
+            controller: ctl,
+            autofocus: true,
+            maxLength: 120,
+            minLines: 1,
+            maxLines: 3,
+            textCapitalization: TextCapitalization.sentences,
+            decoration: const InputDecoration(hintText: 'What needs doing?'),
+            onSubmitted: (v) => Navigator.pop(ctx, v),
+          ),
+          if (todo != null && !todo.manual)
+            Text(
+              'From "${todo.entry!.displayTitle}"${todo.edited ? ' - reworded' : ''}',
+              style: const TextStyle(color: AppColors.textFaint, fontSize: 12),
+            ),
+        ],
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+        TextButton(onPressed: () => Navigator.pop(ctx, ctl.text), child: Text(todo == null ? 'Add' : 'Save')),
+      ],
+    ),
+  );
+  if (text == null || text.trim().isEmpty) return;
+  final n = ref.read(todoEditsProvider.notifier);
+  if (todo == null) {
+    await n.add(text);
+  } else {
+    await n.edit(todo, text);
+  }
+}
+
+/// Off the list, after asking (a memo's to-do: hidden, the memo keeps it).
+Future<void> removeTodo(BuildContext context, WidgetRef ref, Todo todo) async {
+  final ok = await showDialog<bool>(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      title: const Text('Remove this to-do?'),
+      content: Text(todo.manual ? todo.text : '${todo.text}\n\nThe memo it came from stays as it is.'),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+        TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Remove')),
+      ],
+    ),
+  );
+  if (ok == true) await ref.read(todoEditsProvider.notifier).remove(todo);
+}
+
+/// A to-do with a checkbox (kept on the phone, and in sync with the
+/// watch's Reminders app). Tap: its memo (or, one added by hand, edit it);
+/// the menu: edit or remove.
 class ActionRow extends ConsumerWidget {
-  final ActionItem item;
+  final Todo item;
   final bool showMemo;
   const ActionRow(this.item, {super.key, this.showMemo = true});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final done = ref.watch(doneActionsProvider).contains(item.key);
+    final entry = item.entry;
     return InkWell(
-      onTap: () => openMemo(context, item.entry),
+      onTap: entry != null ? () => openMemo(context, entry) : () => editTodo(context, ref, todo: item),
+      onLongPress: () => editTodo(context, ref, todo: item),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
         child: Row(
@@ -341,7 +404,7 @@ class ActionRow extends ConsumerWidget {
             Checkbox(value: done, onChanged: (_) => ref.read(doneActionsProvider.notifier).toggle(item.key)),
             Expanded(
               child: Padding(
-                padding: const EdgeInsets.only(top: 12, bottom: 10, right: 10),
+                padding: const EdgeInsets.only(top: 12, bottom: 10),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -355,7 +418,9 @@ class ActionRow extends ConsumerWidget {
                     ),
                     if (showMemo)
                       Text(
-                        '${item.entry.displayTitle} · ${fmtDate(item.entry.recordedAt)}',
+                        entry == null
+                            ? 'Added by you'
+                            : '${entry.displayTitle} · ${fmtDate(entry.recordedAt)}${item.edited ? ' · edited' : ''}',
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(color: AppColors.textFaint, fontSize: 12),
@@ -363,6 +428,19 @@ class ActionRow extends ConsumerWidget {
                   ],
                 ),
               ),
+            ),
+            PopupMenuButton<String>(
+              tooltip: 'Edit or remove',
+              icon: const Icon(Icons.more_vert_rounded, size: 20, color: AppColors.textFaint),
+              color: AppColors.surfaceLight,
+              onSelected: (v) {
+                if (v == 'edit') editTodo(context, ref, todo: item);
+                if (v == 'remove') removeTodo(context, ref, item);
+              },
+              itemBuilder: (_) => const [
+                PopupMenuItem(value: 'edit', child: Text('Edit')),
+                PopupMenuItem(value: 'remove', child: Text('Remove')),
+              ],
             ),
           ],
         ),
@@ -382,22 +460,19 @@ class _ActionsScreenState extends ConsumerState<ActionsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final kb = ref.watch(knowledgeProvider);
     final done = ref.watch(doneActionsProvider);
-    final all = kb.actions();
+    final all = ref.watch(todosProvider);
     final list = _showDone ? all : all.where((a) => !done.contains(a.key)).toList();
     return Scaffold(
       appBar: AppBar(
-        title: const Text('To-dos from memos'),
+        title: const Text('To-dos'),
         actions: [
           IconButton(
             tooltip: 'Share the list',
             icon: const Icon(Icons.ios_share_rounded),
             onPressed: list.isEmpty
                 ? null
-                : () => MemoExport.shareTodos([
-                    for (final e in {for (final a in list) a.entry}) e,
-                  ]),
+                : () => MemoExport.shareTodoList([for (final a in list) (a.text, done.contains(a.key))]),
           ),
           TextButton(
             onPressed: () => setState(() => _showDone = !_showDone),
@@ -405,14 +480,21 @@ class _ActionsScreenState extends ConsumerState<ActionsScreen> {
           ),
         ],
       ),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: () => editTodo(context, ref),
+        icon: const Icon(Icons.add_rounded),
+        label: const Text('New to-do'),
+      ),
       body: list.isEmpty
           ? const EmptyState(
               icon: Icons.task_alt_rounded,
               title: 'Nothing to do',
-              subtitle: 'Things you say you need to do in a memo show up here.',
+              subtitle:
+                  'Add one with New to-do - and things you say you need to do in a memo show up here too. '
+                  'They are on the watch, in Reminders.',
             )
           : ListView(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 96),
               children: [
                 Panel(
                   padding: const EdgeInsets.symmetric(vertical: 6),
@@ -668,7 +750,7 @@ class CollectionScreen extends ConsumerWidget {
     final name = ref.read(collectionNamesProvider.notifier).nameOf(collection);
     final c = collection;
     final kb = KnowledgeBase.build(c.items); // stats of just this theme
-    final actions = kb.actions();
+    final actions = applyTodoEdits(kb.actions(), ref.watch(todoEditsProvider), withManual: false);
     final people = kb.people(n: 6);
     final secs = kb.totalSeconds;
     return Scaffold(

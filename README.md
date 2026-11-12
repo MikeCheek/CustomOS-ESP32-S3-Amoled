@@ -22,13 +22,35 @@ Built on Arduino + Arduino_GFX, no LVGL.
   - the morning briefing; 30 nights of sleep
   - the camera remote, including with the phone's own camera app (Android)
   - the floating watch on Android
-  - Breathe by sound; clearer sound switches
-  - the Casino (with Roulette); the new Maze Raider
+  - Breathe by sound; two sound switches: System sounds (messages, reminders, apps - alarms always ring) and Game
+    sounds (the games' music and effects)
+  - the Casino (with Roulette, Video Poker and Hi-Lo Dice, stats and a daily bonus); the new Maze Raider
+  - the assistant listens for a follow-up after a spoken answer ("and tomorrow?"), with no wake word
+  - spoken answers without an SD card; messages read aloud (hold one); the morning briefing said aloud
+  - the "Today" complication and Smart Stack card, worded by the phone's AI (tap the card to hear it)
+  - an evening recap of the day, said on the watch and kept as a Smart Stack card; Catch me up read aloud; the
+    briefing said in the phone's language when there's a voice for it; the assistant's earlier answers (swipe up)
+  - messages by voice ("tell Marco I'm late", "di' a Luca che arrivo tardi"), sent after an OK; voice replies
+    touched up by the AI (shorter, friendlier, formal); more commands in Italian without the language model
+  - Diagnostics: the battery cost of the speaker, microphone, GPS and Wi-Fi, next to the screen's
+  - routines ("good night": Do not disturb, the alarm, the recap); calendar events added and moved by voice; on
+    Sundays the recap adds the week's sleep, steps and workouts; only what matters buzzes; with the phone out of
+    reach the assistant offers the watch's own timers, stopwatch and alarms (and offline commands); larger text
+    spaced to fit
+  - notifications in three steps - in full, icon only, silenced - from the control panel, Settings, a Tile, a
+    home gesture or the app
+- **In the app:** AI models > Speed > "Test the language model" checks the model in use; one that keeps answering
+  garbled text is replaced by another installed model, and the app says so.
+- **New in the app, checked on a phone:** the voices speak again (sherpa-onnx 2 needs its text turned into phonemes
+  first), model installs no longer fail, the language model runs on the GPU when it can, and AI models > Speed >
+  Performance times every model run (average, fastest, slowest, where it ran, crashes). Not tried on a phone yet: a
+  play button on each voice, suggestions for the phone from those timings, and the model kept loaded between questions.
 - **iPhone:** the app builds in CI and an unsigned `.ipa` comes with each release. Android-only features are marked as
   such in the app.
 - **Tests:** every push builds the firmware twice (PlatformIO and Arduino), runs the PC tests (falls, sleep,
   handwriting, motion, voice) and the emulator self-tests (storage, Wallet, home gestures, the sound switches,
-  Breathe, roulette payouts, the live view), analyzes and builds the Android app.
+  Breathe, the Casino's payouts, poker hands and stats, the assistant's follow-ups and spoken requests, the live
+  view), analyzes and builds the Android app.
 
 ## Screenshots
 
@@ -53,7 +75,7 @@ Built on Arduino + Arduino_GFX, no LVGL.
 | ![](docs/screenshots/timer_running.png) | ![](docs/screenshots/stopwatch.png) | ![](docs/screenshots/alarms.png) | ![](docs/screenshots/world_clock.png) |
 | Timer | Stopwatch with laps | Alarms | World clock |
 | ![](docs/screenshots/weather.png) | ![](docs/screenshots/reminders.png) | ![](docs/screenshots/workout_types.png) | |
-| Weather | Reminders (memo to-dos) | Workout types | |
+| Weather | Reminders (to-dos) | Workout types | |
 | ![](docs/screenshots/notifications_grouped.png) | ![](docs/screenshots/notifications_swipe.png) | ![](docs/screenshots/power_sos.png) | ![](docs/screenshots/sos_countdown.png) |
 | Notifications stacked by app | Swipe left to clear | Hold PWR: power off or SOS | Emergency SOS |
 | ![](docs/screenshots/life.png) | ![](docs/screenshots/life_meals.png) | ![](docs/screenshots/breathe.png) | ![](docs/screenshots/stretch.png) |
@@ -118,13 +140,16 @@ The five most complete:
      card can be deleted on the watch.
    - The piano is a real synth: six voices, two strings, hammer and damper, chords as written.
    - **Listen** plays a song by itself, with no score.
-2. **Casino**: a casino floor drawn on the round screen, with a slot machine, a blackjack table and a roulette wheel.
-   Tap one to play.
-   - One wallet for all three. When you're out of chips, the cashier tops you up. Play money only.
+2. **Casino**: a casino floor drawn on the round screen, with a slot machine, a blackjack table, a video poker
+   machine, a roulette wheel and a dice table. Tap one to play.
+   - One wallet for all five. When you're out of chips, the cashier tops you up, and once a day there's a bonus. Play
+     money only. **Stats** shows each game's rounds, overall result and biggest win, and your best poker hand.
    - **Crystal Cavern**: cascading clusters, wilds, scatters and free spins.
    - **Blackjack**: side bets, insurance, other players at the table.
    - **Roulette**: a single-zero wheel. Bet on red/black, odd/even, halves, dozens or any number on a 0-36 table. The
      ball runs, drops and settles, ticking on the frets.
+   - **Video Poker**: Jacks or Better on the usual 9/6 table. Tap the cards to keep, then draw once.
+   - **Hi-Lo Dice**: bet that two dice land under 7, on 7 (4:1) or over 7, then watch them tumble.
 3. **Maze Raider**: a 3D raid through a new maze each level.
    - Take every gem to open the portal, then reach it.
    - Enemies find their way to you: red ones bite, purple ones shoot. A boss every 4th level.
@@ -227,7 +252,7 @@ You can play by touch, by tilt, with the phone as a gamepad, or with an ESP-NOW 
   the settings button has both switches.
 - **Apps** - Recorder, Music and Media player (MP3/AAC, video), Gallery, Files, Contacts, Phone, Battery,
   3D printer status (Bambu), sensor tests.
-- **Games**: Piano Tiles, the Casino (Crystal Cavern, Blackjack, Roulette), Maze Raider, Breakout, Flappy and more.
+- **Games**: Piano Tiles, the Casino (Crystal Cavern, Blackjack, Video Poker, Roulette, Hi-Lo Dice), Maze Raider, Breakout, Flappy and more.
   See [Games](#games).
 - **Health** - hardware pedometer with daily history, GPS (on the `-G` board); fall detection (free fall, impact, lying still: "Did you fall?" for 30 s, then the phone rings
   and texts your emergency contact with the location).
@@ -253,6 +278,8 @@ You can play by touch, by tilt, with the phone as a gamepad, or with an ESP-NOW 
 
 - Pair, reconnect automatically and keep the link alive in the background; home-screen widget.
 - Forward notifications (per app), calls, media, calendar, navigation and weather to the watch.
+- **To-dos** - add your own, reword or remove the ones found in memos, tick them off on the phone or in the
+  watch's Reminders app (Apps > To-dos).
 - **Voice memos** - sync recordings (Bluetooth or fast Wi-Fi), or record one on the spot with the phone's mic
   (it's copied to the watch too); transcribe with Whisper and summarize with Gemma / Qwen, all on the phone. Topics, to-dos, people, insights, search and "Ask AI" over your memos - also by meaning
   with an on-phone embedding model (EmbeddingGemma), so "the trip" finds "holiday in Sicily". Conversations are
@@ -315,7 +342,7 @@ One release (tag `vX.Y.Z`) carries both the firmware and the app.
 | **Firmware** | **PlatformIO** (recommended, what releases use): `pio run -t upload` - same sources, plus ESP-IDF power management and Bluetooth modem sleep, so the watch light-sleeps with the phone connected. The first build compiles the core's libraries and takes a while. |
 | **Arduino IDE** | Also builds, without the power management: core **esp32 3.3.10**, board *ESP32S3 Dev Module*, PSRAM *OPI*, flash 16 MB, partitions *Custom* (it uses [`firmware/partitions.csv`](firmware/partitions.csv): two 6 MB app slots), USB CDC on boot. Libraries pinned in [`scripts/arduino-libraries.txt`](scripts/arduino-libraries.txt); three more are vendored in `firmware/libraries/`. |
 | **CLI** | `arduino-cli compile -b esp32:esp32:esp32s3:PSRAM=opi,FlashSize=16M,PartitionScheme=custom,CDCOnBoot=cdc --libraries firmware/libraries firmware` |
-| **Partitions** | Since 3.5 the app slots are 6 MB (were 3 MB). A watch on the old table needs **one USB flash** of a 3.5+ build (PlatformIO `pio run -t upload`, or the IDE with partitions *Custom*): an over-the-air update can't change the table, and once the firmware outgrows 3 MB the watch says it doesn't fit. Settings are kept (NVS doesn't move). |
+| **Partitions** | Since 3.5 the app slots are 6 MB (were 3 MB). A watch on the old table needs **one USB flash** of a 3.5+ build (PlatformIO `pio run -t upload`, or the IDE with partitions *Custom*): an over-the-air update can't change the table, and once the firmware outgrows 3 MB the watch says it doesn't fit. Settings are kept (NVS doesn't move). Without PlatformIO: flash the release's (or CI's) `AmoledSmartWatchOS-x.y.z-full.bin` at `0x0` - `python -m esptool --chip esp32s3 --port COM3 write_flash 0x0 AmoledSmartWatchOS-x.y.z-full.bin` - which holds the bootloader, the new table and the firmware; or write the table yourself with `python tools/partitions_bin.py` (at `0x8000`). |
 | **App** | `cd companion_app && flutter pub get && flutter run` |
 | **iPhone app** | On a Mac with Xcode: `cd companion_app && flutter build ios` (or `flutter run` with an iPhone plugged in). iOS 16+; photo-face subjects need iOS 17. The Podfile fetches the watch emulator's two libraries itself (`ios/WatchEmu/fetch_libs.sh`). Signing needs your Apple developer team in Xcode. **Without a Mac:** each release (and Actions > build > Run workflow) has `AmoledWatch-ios-<version>-unsigned.ipa`; install it with [Sideloadly](https://sideloadly.io) or [AltStore](https://altstore.io), which sign it with your Apple ID - a free one re-signs every 7 days (AltStore does it by itself) and may leave out Apple Health; a paid developer account doesn't expire. CI builds iOS for tags and manual runs only (macOS minutes cost 10x). On iPhone, iOS doesn't let an app read other apps' notifications, change Do Not Disturb, control other apps' music or send texts by itself, so those parts of the phone link are Android-only (their screens say so and what works instead); a fall alert opens Messages with the text and location ready, or shows a notification that does. The watch link, memos, the assistant, all the on-phone AI, photo faces, Look, the emulator, calendar, contacts and weather work. |
 | **Screenshots** | `tools/watch_sim/run.sh` - compiles the UI for the PC and renders `docs/screenshots/` |

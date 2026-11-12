@@ -9,6 +9,7 @@
 #include "app_tips.h"
 #include "app_tiles.h"
 #include "home_gestures.h"
+#include "dnd.h"
 #include "app_calibration.h"
 #include "app_wifi_setup.h"
 #include "app_usb.h"
@@ -105,6 +106,13 @@ static bool get_wrist_down() { return g_app_settings.wrist_down_sleep; }
 static void tap_wrist_down() { g_app_settings.wrist_down_sleep = !g_app_settings.wrist_down_sleep; nvs_save_settings(g_app_settings); }
 static bool get_ndim() { return g_app_settings.night_dim; }
 static void tap_ndim() { g_app_settings.night_dim = !g_app_settings.night_dim; nvs_save_settings(g_app_settings); }
+static void tap_notif_mode() { notif_mode_next(); }
+static const char *desc_notif_mode() {
+    static char b[64];
+    NotifMode m = notif_mode();
+    snprintf(b, sizeof(b), "%s - %s", notif_mode_name(m), notif_mode_hint(m));
+    return b;
+}
 static bool get_brief() { return g_app_settings.morning_brief; }
 static void tap_brief() { g_app_settings.morning_brief = !g_app_settings.morning_brief; nvs_save_settings(g_app_settings); }
 static bool get_wake_motion() { return g_app_settings.wake_on_motion; }
@@ -342,8 +350,8 @@ static SettingsRow ROWS_SOUND[] = {
     { "Volume", "Speaker volume level", ROW_SUBSCREEN, nullptr, nullptr, &settings_volume_screen, ICON_VOLUME },
     { "Voice", "Wake word, commands, voice cleanup", ROW_SUBSCREEN, nullptr, nullptr, &settings_voice_screen, ICON_SOUND },
     { "Microphone", "Recording sensitivity", ROW_SUBSCREEN, nullptr, nullptr, &settings_mic_screen, ICON_SOUND },
-    { "All sounds", "Messages, apps, games", ROW_TOGGLE, get_sfx, tap_sfx, nullptr, ICON_SOUND },
-    { "Game music", "Games' music, from SD /music", ROW_TOGGLE, get_music, tap_music, nullptr, ICON_SOUND },
+    { "System sounds", "Messages, reminders, the assistant, apps - alarms always ring", ROW_TOGGLE, get_sfx, tap_sfx, nullptr, ICON_SOUND },
+    { "Game sounds", "Games' music and effects", ROW_TOGGLE, get_music, tap_music, nullptr, ICON_SOUND },
     { "Haptic on Touch", "Vibrate briefly on every tap", ROW_TOGGLE, get_haptic, tap_haptic, nullptr, ICON_VIBRATION },
     { "Notification sounds", "A tune per message, goal", ROW_TOGGLE, get_cues, tap_cues, nullptr, ICON_SOUND },
 };
@@ -385,6 +393,7 @@ static void tap_fall() {
 static SettingsRow ROWS_WAKE[] = {
     { "Wake on Motion", "Wake when you raise your wrist", ROW_TOGGLE, get_wake_motion, tap_wake_motion, nullptr, ICON_ROTATE },
     { "Lower wrist to sleep", "The screen goes off when you turn it away", ROW_TOGGLE, get_wrist_down, tap_wrist_down, nullptr, ICON_ROTATE },
+    { "Notifications", "", ROW_ACTION, nullptr, tap_notif_mode, nullptr, nullptr, nullptr, nullptr, desc_notif_mode },
     { "Morning briefing", "The first look each morning: weather, sleep, the day", ROW_TOGGLE, get_brief, tap_brief, nullptr, nullptr },
     { "Wake on Touch", "Wake the display on tap", ROW_TOGGLE, get_wake_touch, tap_wake_touch, nullptr, ICON_TOUCH },
     { "Bedtime DND", "Silent at night (hours set in the app)", ROW_TOGGLE, get_dnd_bed, tap_dnd_bed, nullptr, ICON_SOUND },

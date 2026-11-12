@@ -10,21 +10,21 @@
 // rather than verified-final. If any land wrong once you hear them on
 // the device, tell me which and I'll adjust the freq/duration pairs.
 
-void game_sfx_shoot()     { if (g_app_settings.sfx_enabled) audio_play_sfx(1400, 40); }
-void game_sfx_hit()       { if (g_app_settings.sfx_enabled) audio_play_sfx(220, 90); }
-void game_sfx_explosion() { if (g_app_settings.sfx_enabled) audio_play_sfx(140, 130); }
-void game_sfx_score()     { if (g_app_settings.sfx_enabled) audio_play_sfx(1800, 60); }
-void game_sfx_gameover()  { if (g_app_settings.sfx_enabled) audio_play_sfx(180, 260); }
+void game_sfx_shoot()     { if (game_sounds_on()) audio_play_sfx(1400, 40); }
+void game_sfx_hit()       { if (game_sounds_on()) audio_play_sfx(220, 90); }
+void game_sfx_explosion() { if (game_sounds_on()) audio_play_sfx(140, 130); }
+void game_sfx_score()     { if (game_sounds_on()) audio_play_sfx(1800, 60); }
+void game_sfx_gameover()  { if (game_sounds_on()) audio_play_sfx(180, 260); }
 
 // Two-tone ascending chirp for a level clear - a single audio_play_sfx()
 // call can't easily do "two notes", so this queues two short beeps back
 // to back via the same non-blocking SFX task.
 void game_sfx_levelup() {
-    if (!g_app_settings.sfx_enabled) return;
+    if (!game_sounds_on()) return;
     audio_play_sfx(1200, 70);
     audio_play_sfx(1800, 90);
 }
-void game_sfx_powerup()   { if (g_app_settings.sfx_enabled) audio_play_sfx(2400, 50); }
+void game_sfx_powerup()   { if (game_sounds_on()) audio_play_sfx(2400, 50); }
 
 // A distinct musical note per Simon quadrant (0-3) - a simple ascending
 // major arpeggio (C4/E4/G4/C5), the classic "each button has its own
@@ -32,7 +32,7 @@ void game_sfx_powerup()   { if (g_app_settings.sfx_enabled) audio_play_sfx(2400,
 // the valid range rather than trusting every caller to range-check
 // first.
 void game_sfx_simon_note(int idx) {
-    if (!g_app_settings.sfx_enabled) return;
+    if (!game_sounds_on()) return;
     static const uint16_t notes[4] = { 262, 330, 392, 523 };
     if (idx < 0) idx = 0;
     if (idx > 3) idx = 3;

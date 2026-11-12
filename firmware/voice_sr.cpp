@@ -227,6 +227,10 @@ static volatile bool s_cmds_failed = false;
 static const esp_mn_iface_t *s_mn = nullptr;
 static model_iface_data_t *s_mnd = nullptr;
 static volatile bool s_cmd_listen = false;  // wake_ctl: feeding MultiNet after the word
+// The assistant with no phone (voice_offline_command()): a command right away,
+// no wake word, while the assistant is on screen.
+static volatile bool s_force_cmd = false;   // main loop -> wake_ctl: start listening for a command
+static volatile bool s_offline_ui = false;  // the assistant asked: don't pause for it, and say a miss
 static volatile int s_cmd_result = CMD_NONE;    // wake_ctl -> main loop, -1 = nothing understood
 // What was said after the word (PSRAM, 10 s): the question when it isn't a command.
 static const int CAP_SAMPLES = VoiceCapture::RATE * 10;
@@ -383,6 +387,14 @@ static void wake_ctl(void *) {
                 s_cap_ready = true;
                 s_cmd_result = -1;
             }
+            continue;
+        }
+        if (s_force_cmd && !s_cmd_listen && s_mnd) {
+            s_force_cmd = false;
+            s_mn->clean(s_mnd);
+            s_ifc->disable_wakenet(s_afe);
+            s_cap_on = false;            // no question to send: there's no phone
+            s_cmd_listen = true;
             continue;
         }
         if (s_cmd_listen) {
@@ -647,8 +659,10 @@ void voice_update() {
     s_want = want;
 
     bool asleep = sleep_is_asleep();
-    bool pause = !want || audio_is_recording() || audio_is_playing() || ui_screen_on_top(&assistant_screen) ||
-                 (asleep && !g_app_settings.voice_wake_asleep);
+    bool offline = s_offline_ui && ui_screen_on_top(&assistant_screen);
+    if (s_offline_ui && !offline) { s_offline_ui = false; s_force_cmd = false; }   // the assistant closed
+    bool pause = !want || audio_is_recording() || audio_is_playing() ||
+                 (ui_screen_on_top(&assistant_screen) && !offline) || (asleep && !g_app_settings.voice_wake_asleep);
     s_pause = pause;
     audio_mic_hold(want && !pause && s_afe);
 
@@ -667,7 +681,12 @@ void voice_update() {
     int cmd = s_cmd_result;
     if (cmd != CMD_NONE) {
         s_cmd_result = CMD_NONE;
-        if (!pause) {
+        if (offline) {
+            s_offline_ui = false;
+            sleep_register_activity();
+            if (cmd >= 0 && cmd != CMD_ASSISTANT) run_command(cmd);
+            else ui_show_toast("Didn't catch a command I know offline", 2200);
+        } else if (!pause) {
             sleep_register_activity();
             if (cmd >= 0) {
                 run_command(cmd);
@@ -733,6 +752,14 @@ const char *voice_wake_status() {
     }
 }
 
+bool voice_offline_command() {
+    if (!s_afe || !s_mnd || s_cmd_listen || s_cap_extend) return false;
+    s_offline_ui = true;
+    s_force_cmd = true;
+    return true;
+}
+bool voice_offline_listening() { return s_offline_ui; }
+
 bool voice_commands_installed() {
     if (!s_scanned) scan_models();
     return s_mn_dir[0] != 0;
@@ -773,6 +800,14 @@ bool voice_model_file(const char *name, const uint8_t *data, int len) {
     return true;
 }
 
+bool voice_model_installed(const char *dir) {
+    scan_models();
+    if (!strncmp(dir, "mn7", 3)) return !strcmp(s_mn_dir, dir);
+    for (int i = 0; i < s_model_n; i++)
+        if (!strcmp(s_models[i].dir, dir)) return true;
+    return false;
+}
+
 #else // no ESP-SR in this build -------------------------------------------------------
 
 void voice_init() {}
@@ -784,7 +819,10 @@ int voice_wake_model_count() { return 0; }
 void voice_wake_next_model() {}
 bool voice_wake_keeps_awake() { return false; }
 bool voice_model_file(const char *, const uint8_t *, int) { return false; }
+bool voice_model_installed(const char *) { return false; }
 bool voice_commands_installed() { return false; }
+bool voice_offline_command() { return false; }
+bool voice_offline_listening() { return false; }
 const char *voice_commands_status() { return "Not in this build"; }
 
 #endif

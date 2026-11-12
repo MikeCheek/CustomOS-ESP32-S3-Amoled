@@ -14,6 +14,7 @@
  */
 
 #include "app_wifi_setup.h"
+#include "psram_static.h"
 #include "config.h"
 #include "board_pins.h"
 #include "hal_wifi.h"
@@ -46,7 +47,7 @@ struct WifiNet {
     bool open;
 };
 #define MAX_NETS 20
-static WifiNet s_nets[MAX_NETS];
+PS_ARRAY(WifiNet, s_nets, [MAX_NETS]);
 static int s_net_count;
 static bool s_scan_started;
 static bool s_scan_done;

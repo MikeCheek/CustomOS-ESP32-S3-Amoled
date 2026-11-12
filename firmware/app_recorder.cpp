@@ -1,4 +1,5 @@
 #include "app_recorder.h"
+#include "psram_static.h"
 #include "app_media.h"
 #include "media_library.h"
 #include "config.h"
@@ -153,7 +154,7 @@ static const int R_RING = 150, RING_AMP = 46;     // waveform ring
 static const int STOP_Y = CY + 112, STOP_R = 34;
 static const uint16_t C_MIC1 = COLOR565(0x33, 0xCC, 0xFF), C_MIC2 = COLOR565(0xFF, 0xA0, 0x33);
 
-static float    s_hist[2][HIST];                  // 0..1, [0] newest
+PS_ARRAY(float, s_hist, [2][HIST]);                  // 0..1, [0] newest
 static float    s_lvl[2], s_peak_acc[2];          // smoothed level, max since last push
 static uint32_t s_hist_ms = 0;
 static float    s_ring[2][64];                    // smoothed waveform for the ring
@@ -439,7 +440,7 @@ static void enter_select(int first) {
 // with Play at the top.
 static int s_tx_index = -1;
 static char *s_tx = nullptr;          // the text (PSRAM)
-static int s_tx_lines[400];           // where each wrapped line starts in s_tx
+PS_ARRAY(int, s_tx_lines, [400]);           // where each wrapped line starts in s_tx
 static int s_tx_n = 0;
 static UiScroll s_tx_scroll;
 static bool s_tx_play_press = false;

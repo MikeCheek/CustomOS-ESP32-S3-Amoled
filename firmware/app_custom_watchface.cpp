@@ -1,4 +1,5 @@
 #include <esp_heap_caps.h>
+#include "psram_static.h"
 #include "complications.h"
 #include "app_custom_watchface.h"
 #include "config.h"
@@ -34,7 +35,7 @@ struct CachedWidget {
     char dataSrc[32];
 };
 
-static CachedWidget s_widgets[MAX_WIDGETS];
+PS_ARRAY(CachedWidget, s_widgets, [MAX_WIDGETS]);
 static int s_widget_count = 0;
 static uint16_t s_bg_color = 0;
 static bool s_has_layout = false;

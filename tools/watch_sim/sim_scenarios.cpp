@@ -6,6 +6,9 @@
 #include "config.h"
 #include "ui.h"
 #include "app_face_nav.h"
+#include "complications.h"
+#include "dnd.h"
+#include "home_gestures.h"
 extern Screen settings_body_screen;
 #define settings_body_screen_ref settings_body_screen
 extern Screen contacts_screen;
@@ -61,7 +64,9 @@ extern Screen menu_screen, watchface_minimal_screen, nowplaying_screen, calendar
     flappy_screen, fruitninja_screen, battery_screen, recorder_screen, piano_screen, assistant_screen,
     fall_alert_screen, sleep_screen, draw_screen, activity_screen;
 void sleep_load_demo();
-void assistant_on_result(uint32_t, const char *, const char *, const char *, int32_t, const char *);
+void dictate_open(uint32_t, const char *);
+void dictate_on_result(uint32_t, uint32_t, const char *, const char *);
+void assistant_on_result(uint32_t, const char *, const char *, const char *, int32_t, const char *, bool, bool);
 
 // Local epoch seconds of today (2026-10-08) at hh:mm, like calendar_now().
 static uint32_t at(int hh, int mm) { return 20734u * 86400u + hh * 3600u + mm * 60u; }
@@ -158,6 +163,13 @@ void sim_scenarios() {
         static const char *const N[10] = {"tile_activity", "tile_weather", "tile_next", "tile_music", "tile_timer",
                                           "tile_life", "tile_world", "tile_alarm", "tile_reminders", "tile_battery"};
         for (int i = 0; i < 10; i++) { tiles_set_page(i); shot(&tiles_screen, N[i]); }
+        // the Notifications tile, in each of its steps
+        static const uint8_t NT[10] = {TL_NOTIF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+        memcpy(g_app_settings.tiles, NT, sizeof(NT));
+        tiles_set_page(0);
+        notif_mode_set(NM_ICON);
+        shot(&tiles_screen, "tile_notif");
+        notif_mode_set(NM_FULL);
         tiles_set_page(0);
         memcpy(g_app_settings.tiles, keep, sizeof(keep));
     }
@@ -255,6 +267,7 @@ void sim_scenarios() {
     shot(&pet_screen_ref, "review_pet");
     shot(&diagnostics_screen_ref, "review_diagnostics");
     shot(&snake_screen_ref, "review_snake", 600);
+    comp_set_brief("3", "Prep the review", "2 events left: Design review at 15:00, Gym at 19:00. To do: Call Marco.");
     shot(&smart_stack_screen, "smart_stack");
     // more from one app: they stack up
     sim_link("{\"t\":\"ntf\",\"id\":14,\"ap\":\"WhatsApp\",\"ti\":\"Marco\",\"tx\":\"Are you coming tonight?\",\"rp\":1}");
@@ -307,10 +320,57 @@ void sim_scenarios() {
     shot(&assistant_screen, "assistant_listen", 900);
     sim_tap(233, 233);
     sim_run(200);
-    assistant_on_result(1, "Set a timer for 10 minutes for the pasta", "Timer set for 10 minutes.", "timer", 600, "");
+    assistant_on_result(1, "Set a timer for 10 minutes for the pasta", "Timer set for 10 minutes.", "timer", 600, "", false, false);
     sim_run(1500);
     sim_save("assistant_answer");
     g_sim.recording = false;
+    // a word wider than the screen (a link, run-together text): broken to fit
+    shot(&assistant_screen, "assistant_listen", 900);
+    sim_tap(233, 233);
+    sim_run(200);
+    assistant_on_result(2, "Where is it?", "It's at https://maps.example.com/place/thereallylongaddresswithoutanyspaces in town.",
+                        "", 0, "", false, false);
+    sim_run(800);
+    sim_save("assistant_long_word");
+    g_sim.recording = false;
+    // Settings > Text size > Larger: the answer's lines spaced for the bigger letters
+    g_app_settings.text_size = 2;
+    shot(&assistant_screen, "assistant_listen", 900);
+    sim_tap(233, 233);
+    sim_run(200);
+    assistant_on_result(3, "What's the weather like?", "Sunny until four, then rain - take an umbrella if you go out tonight.",
+                        "", 0, "", false, false);
+    sim_run(800);
+    sim_save("assistant_large_text");
+    g_sim.recording = false;
+    g_app_settings.text_size = 0;
+    // the phone out of reach: what the watch does by itself
+    { bool was = g_sim.phone;
+      g_sim.phone = false;
+      shot(&assistant_screen, "assistant_offline", 900);
+      g_sim.phone = was;
+      sim_link("{\"t\":\"hi\"}");   // the app links up again
+      sim_run(300); }
+    // a message by voice, waiting for its OK
+    shot(&assistant_screen, "assistant_listen", 900);
+    sim_tap(233, 233);
+    sim_run(200);
+    assistant_on_result(4, "Tell Marco I'm 10 minutes late", "Send to Marco on WhatsApp: \"I'm 10 minutes late\"? Tap Send, or say yes.",
+                        "send", 0, "", false, false);
+    sim_run(800);
+    sim_save("assistant_send");
+    g_sim.recording = false;
+    // a voice reply, transcribed: the AI can touch it up before it's sent
+    { extern Screen dictate_screen;
+      dictate_open(14, "Marco");
+      sim_run(2500);
+      sim_tap(233, 233);   // done talking
+      sim_run(300);
+      dictate_on_result(14, 0, "yes I'm coming tonight see you at eight at the usual place", "");
+      sim_run(600);
+      sim_save("voice_reply_rewrite");
+      ui_pop_screen(); sim_run(300);
+      g_sim.recording = false; }
 
     // Fall detection asking
     shot(&fall_alert_screen, "fall_alert", 8000);
@@ -365,10 +425,38 @@ void sim_scenarios() {
       sim_tap(233 + 55, 415); sim_run(2600); sim_save("roulette_spin");
       sim_run(3400); sim_save("roulette_result");
       ui_pop_screen(); sim_run(500); }
+    // Video Poker: dealt, two cards held, drawn
+    { extern Screen videopoker_screen;
+      shot(&videopoker_screen, "videopoker");
+      sim_tap(233 + 80, 341); sim_run(900); sim_save("videopoker_deal");
+      sim_tap(81, 209); sim_tap(157, 209); sim_run(300); sim_save("videopoker_hold");   // the first two cards held
+      sim_tap(233 + 80, 341); sim_run(1000); sim_save("videopoker_result");
+      ui_pop_screen(); sim_run(500); }
+    // The Casino's stats page (after the rounds above)
+    { extern Screen casino_stats_screen; shot(&casino_stats_screen, "casino_stats"); }
+    // Hi-Lo Dice: chips on Under 7 and Seven, the roll, the result
+    { extern Screen dice_screen;
+      shot(&dice_screen, "dice");
+      sim_tap(233 - 126, 298); sim_tap(233 - 126, 298); sim_tap(233, 298); sim_run(300); sim_save("dice_bets");
+      sim_tap(233, 422); sim_run(500); sim_save("dice_roll");
+      sim_run(1600); sim_save("dice_result");
+      ui_pop_screen(); sim_run(500); }
     // Maze Raider: the title, then a few seconds in
     { extern Screen maze_screen; shot(&maze_screen, "game_maze_title");
       sim_tap(233, 300); sim_run(6000); sim_save("game_maze"); }
 
+    home();
+    // Notifications: icon only - a new message pops up as just its app
+    notif_mode_set(NM_ICON);
+    sim_link("{\"t\":\"ntf\",\"id\":31,\"ap\":\"Telegram\",\"ti\":\"Luca\",\"tx\":\"On my way\",\"rp\":1}");
+    sim_run(400);
+    sim_save("notif_icon_only");
+    ui_top_panel_open();
+    sim_run(1500);
+    sim_save("quick_panel_icon_only");
+    ui_top_panel_close();
+    sim_run(800);
+    notif_mode_set(NM_FULL);
     home();
     ui_top_panel_open();
     sim_run(1500);

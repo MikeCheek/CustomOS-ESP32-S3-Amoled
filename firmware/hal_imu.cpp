@@ -36,6 +36,13 @@ static uint32_t s_last_step_ms = 0;
 static ImuSample s_last;               // last real sample
 static uint32_t s_last_ms = 0;
 
+// One reader at a time: the main loop (imu_read) and the sampler task below
+static SemaphoreHandle_t s_lock = nullptr;
+struct ImuLock {
+    ImuLock() { if (s_lock) xSemaphoreTake(s_lock, portMAX_DELAY); }
+    ~ImuLock() { if (s_lock) xSemaphoreGive(s_lock); }
+};
+
 static uint32_t today() {
     WatchTime t = rtc_now();
     if (t.year < 2024) return 0;
@@ -43,6 +50,7 @@ static uint32_t today() {
 }
 
 bool imu_init() {
+    if (!s_lock) s_lock = xSemaphoreCreateMutex();
     s_ok = s_imu.begin(Wire, IMU_I2C_ADDR, PIN_IIC_SDA, PIN_IIC_SCL);
     if (!s_ok) {
         DEBUG_PRINTF("[imu] QMI8658 init FAILED at 0x%02X\n", IMU_I2C_ADDR);
@@ -52,11 +60,13 @@ bool imu_init() {
     // 62.5 Hz accelerometer only: enough for tilt controls and wrist
     // wake, what the on-chip pedometer is tuned for, and a fraction of
     // the power of the old 250 Hz accel + 224 Hz gyro (nothing used the
-    // gyro).
+    // gyro). Low-pass at 13.37% of the rate (~8 Hz): smooths the jitter but
+    // keeps a flick's or a fall's short spike - mode 0 (2.66%, ~1.7 Hz)
+    // flattened those below what the detectors look for.
     s_imu.configAccelerometer(
         SensorQMI8658::ACC_RANGE_4G,
         SensorQMI8658::ACC_ODR_62_5Hz,
-        SensorQMI8658::LPF_MODE_0);
+        SensorQMI8658::LPF_MODE_3);
     s_imu.enableAccelerometer();
 
     // Pedometer windows are in samples at 62.5 Hz: 0.8 s batch, a step
@@ -82,10 +92,21 @@ bool imu_init() {
     return true;
 }
 
+static volatile bool s_sampling = false;   // the sampler task below is running
+
 ImuSample imu_read() {
     ImuSample s{};
     if (!s_ok) { s.valid = false; return s; }
 
+    ImuLock lock;
+    // While the sampler runs, it reads every sample (62.5 Hz) and keeps the
+    // latest here: its reads also clear the chip's data-ready flag, so
+    // waiting for that below would find none (raise to wake saw no motion).
+    if (s_sampling) {
+        if (s_last.valid && millis() - s_last_ms < 100) return s_last;
+        s.valid = false;
+        return s;
+    }
     if (s_imu.getDataReady()) {
         s_imu.getAccelerometer(s.ax, s.ay, s.az);
         s.temperature_c = s_last.temperature_c;
@@ -100,28 +121,86 @@ ImuSample imu_read() {
     return s;
 }
 
-// ---- FIFO ----------------------------------------------------------------------------
-static bool s_fifo = false;
+// ---- Every sample, for fall detection and activity -----------------------------------
+// A small task reads the accelerometer at its own 62.5 Hz into a 2 s ring
+// that imu_fifo_read() drains. (Not the chip's FIFO: its "read FIFO"
+// command never completes on this board, and SensorLib waits a whole
+// second for it on every read - that stalled the main loop.)
+static const int RING = 128;
+static float s_ring[RING * 3];
+static volatile uint16_t s_head = 0, s_tail = 0;   // written by the task / by the reader
+static portMUX_TYPE s_ring_mux = portMUX_INITIALIZER_UNLOCKED;
+static TaskHandle_t s_sampler = nullptr;
+
+static void sampler_task(void *) {
+    TickType_t next = xTaskGetTickCount();
+    for (;;) {
+        if (!s_sampling) {
+            ulTaskNotifyTake(pdTRUE, portMAX_DELAY);   // parked until switched on again
+            next = xTaskGetTickCount();
+            continue;
+        }
+        float x, y, z;
+        bool ok;
+        {
+            ImuLock lock;
+            ok = s_imu.getAccelerometer(x, y, z);
+            if (ok) {   // the latest, for imu_read()
+                s_last.ax = x;
+                s_last.ay = y;
+                s_last.az = z;
+                s_last.valid = true;
+                s_last_ms = millis();
+            }
+        }
+        if (ok) {
+            portENTER_CRITICAL(&s_ring_mux);
+            uint16_t h = s_head;
+            s_ring[h * 3] = x;
+            s_ring[h * 3 + 1] = y;
+            s_ring[h * 3 + 2] = z;
+            s_head = (h + 1) % RING;
+            if (s_head == s_tail) s_tail = (s_tail + 1) % RING;   // full: the oldest goes
+            portEXIT_CRITICAL(&s_ring_mux);
+        }
+        vTaskDelayUntil(&next, pdMS_TO_TICKS(16));   // the accelerometer's 62.5 Hz
+    }
+}
 
 bool imu_fifo_enable(bool on) {
-    if (!s_ok || on == s_fifo) return s_ok;
-    bool ok = s_imu.configFIFO(on ? SensorQMI8658::FIFO_MODE_STREAM : SensorQMI8658::FIFO_MODE_BYPASS,
-                               SensorQMI8658::FIFO_SAMPLES_128);
-    s_imu.enableAccelerometer();    // configFIFO() switches it off while it reconfigures
-    s_fifo = on && ok;
-    DEBUG_PRINTF("[imu] FIFO %s%s\n", on ? "on" : "off", ok ? "" : " (failed)");
-    return ok;
+    if (!s_ok) return false;
+    if (on == s_sampling) return true;
+    if (on && !s_sampler) {
+        // high enough to keep its pace under the UI; each read is ~0.3 ms of I2C
+        if (xTaskCreatePinnedToCore(sampler_task, "imu_smp", 3072, nullptr, 3, &s_sampler, 1) != pdPASS) {
+            s_sampler = nullptr;
+            DEBUG_PRINTF("[imu] sampler task failed\n");
+            return false;
+        }
+    }
+    portENTER_CRITICAL(&s_ring_mux);
+    s_head = 0;
+    s_tail = 0;
+    portEXIT_CRITICAL(&s_ring_mux);
+    s_sampling = on;
+    if (on && s_sampler) xTaskNotifyGive(s_sampler);
+    DEBUG_PRINTF("[imu] sampling %s\n", on ? "on" : "off");
+    return true;
 }
 
 int imu_fifo_read(float *xyz, int max_samples) {
-    if (!s_ok || !s_fifo || max_samples <= 0) return 0;
-    static IMUdata buf[128];
-    int n = s_imu.readFromFifo(buf, max_samples < 128 ? max_samples : 128, nullptr, 0);
-    for (int i = 0; i < n; i++) {
-        xyz[i * 3] = buf[i].x;
-        xyz[i * 3 + 1] = buf[i].y;
-        xyz[i * 3 + 2] = buf[i].z;
+    if (!s_ok || !s_sampling || max_samples <= 0) return 0;
+    int n = 0;
+    portENTER_CRITICAL(&s_ring_mux);
+    while (s_tail != s_head && n < max_samples) {
+        uint16_t t = s_tail;
+        xyz[n * 3] = s_ring[t * 3];
+        xyz[n * 3 + 1] = s_ring[t * 3 + 1];
+        xyz[n * 3 + 2] = s_ring[t * 3 + 2];
+        s_tail = (t + 1) % RING;
+        n++;
     }
+    portEXIT_CRITICAL(&s_ring_mux);
     return n;
 }
 

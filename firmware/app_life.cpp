@@ -1,5 +1,6 @@
 // Life: habits, nudges, Breathe and Stretch - see app_life.h.
 #include "app_life.h"
+#include "psram_static.h"
 #include "store.h"
 #include "config.h"
 #include "board_pins.h"
@@ -47,7 +48,7 @@ static LifeDay s_today = {};
 // The days before today, newest first: 90 in the store (store.h), 7 in NVS
 // when there's nowhere else.
 static const int HIST_MAX = 90;
-static LifeDay s_hist[HIST_MAX];
+PS_ARRAY(LifeDay, s_hist, [HIST_MAX]);
 static int s_hist_n = 0;
 static bool s_hist_dirty = false;
 static int hist_cap() { return store_ok() ? HIST_MAX : 7; }
@@ -420,7 +421,8 @@ static void habit_value(int h, char *b, int n) {
 //  The Life app: the score and today's habits
 // =========================================================================
 static UiScroll s_scroll;
-static int s_rows[H_COUNT], s_row_n = 0;
+PS_ARRAY(int, s_rows, [H_COUNT]);
+static int s_row_n = 0;
 static const int ROW = 84, TOP = 250;
 extern Screen life_meal_screen;
 
@@ -685,7 +687,7 @@ static uint32_t s_br_start = 0;   // 0: choosing the length; set ahead of now fo
 static int s_br_phase = -1;
 static const uint32_t BR_LEAD = 2200;   // the start chime, then the first breath
 
-// Sounds to breathe by with the eyes closed (with All sounds on): soft
+// Sounds to breathe by with the eyes closed (with System sounds on): soft
 // piano notes, each phase its own shape -
 //   start: a quick rising C-E-G        in: two notes stepping up (A-E)
 //   out:   the same two stepping down  end: a falling run onto a full chord
@@ -727,7 +729,7 @@ static void br_draw() {
         ui_text_center(CX, 228, COLOR_TEXT_DIM, "Follow the circle: in as it grows, out as it shrinks", 1);
         ui_text_center(CX, 246, COLOR_TEXT_DIM,
                        g_app_settings.sfx_enabled ? "Eyes closed? Notes go up: in, down: out"
-                                                  : "All sounds on: breathe by sound", 1);
+                                                  : "System sounds on: breathe by sound", 1);
         static const int L[3] = {1, 3, 5};
         for (int i = 0; i < 3; i++) {
             int x = CX - 120 + i * 120;

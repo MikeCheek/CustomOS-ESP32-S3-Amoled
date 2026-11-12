@@ -1,4 +1,6 @@
 #include "app_activity.h"
+#include "psram_static.h"
+#include <math.h>
 #include "app_fall.h"
 #include "motion_detect.h"
 #include "fitness.h"
@@ -29,7 +31,7 @@ void motion_update() {
     if (!need) return;
     static uint32_t last_ms = 0;
     uint32_t now = millis();
-    // The FIFO holds 128 samples, ~2 s at 62.5 Hz. Awake: every 0.4 s (a
+    // The sample ring holds 128, ~2 s at 62.5 Hz. Awake: every 0.4 s (a
     // flick goes back at once). Screen off: every 1.6 s - a quarter of the
     // I2C reads and wake-ups, nothing lost, and a fall still shows within 2 s.
     uint32_t every = (sleep_is_asleep() && !s_counting) ? 1600 : 400;
@@ -41,10 +43,13 @@ void motion_update() {
         for (auto &x : s_secs) x = 0;
     }
     bool awake = !sleep_is_asleep();
-    static float xyz[128 * 3];
+    PS_ARRAY(float, xyz, [128 * 3]);
     int n = imu_fifo_read(xyz, 128);
+    float peak = 0;   // the strongest jolt in this batch, for the log (tuning the flick)
     for (int i = 0; i < n; i++) {
         float x = xyz[i * 3], y = xyz[i * 3 + 1], z = xyz[i * 3 + 2];
+        float d = fabsf(sqrtf(x * x + y * y + z * z) - 1.0f);
+        if (d > peak) peak = d;
         if (g_app_settings.fall_detect) fall_feed(x, y, z);
         if (track && s_act.feed(x, y, z)) {
             s_secs[s_act.current()] += 5;
@@ -56,6 +61,11 @@ void motion_update() {
             DEBUG_PRINTF("[motion] flick: back\n");
             ui_pop_screen();
         }
+    }
+    static uint32_t s_peak_log_ms = 0;
+    if (peak > 1.0f && now - s_peak_log_ms > 1000) {   // a flick needs two above 1.3 g, 0.15-0.6 s apart
+        s_peak_log_ms = now;
+        DEBUG_PRINTF("[motion] jolt %.1f g (%d samples)\n", peak, n);
     }
 }
 

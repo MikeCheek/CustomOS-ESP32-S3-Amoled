@@ -1,4 +1,5 @@
 #include "ui.h"
+#include "psram_static.h"
 #include "app_face_nav.h"
 #include "hal_rtc.h"
 #include "clock_fmt.h"
@@ -103,6 +104,7 @@ struct ToastEntry {
     char     text[96];
     uint32_t until_ms;
     uint32_t icon;       // phone_images.h hash, 0 = none
+    bool     badge;      // just the icon (text: the app's name, when there's no icon)
 };
 static ToastEntry s_toast_queue[TOAST_QUEUE_SIZE];
 static int s_toast_head = 0;
@@ -223,8 +225,8 @@ bool ui_is_on_circle(int x, int y) {
 // ---- Auto-rotate -----------------------------------------------------------
 // Precomputed circle row bounds: for each row, the leftmost and rightmost
 // pixel inside the circle. Avoids per-pixel circle test.
-static int s_circ_left[LCD_HEIGHT];
-static int s_circ_right[LCD_HEIGHT];
+PS_ARRAY(int, s_circ_left, [LCD_HEIGHT]);
+PS_ARRAY(int, s_circ_right, [LCD_HEIGHT]);
 
 static void init_circle_bounds() {
     int half = LCD_WIDTH / 2;
@@ -1070,9 +1072,11 @@ void ui_update() {
 
     static uint32_t s_last_base_log = 0;
     if (t2 - s_last_base_log > 5000) {
-        DEBUG_PRINTF("[perf] draw=%lums rot=%lums handoff=%lums angle=%d\n",
+        // cpu/apb: what the clocks are right now (power management can lower them while calm)
+        DEBUG_PRINTF("[perf] draw=%lums rot=%lums handoff=%lums angle=%d cpu=%luMHz apb=%luMHz calm=%d\n",
                      (unsigned long)(t0 - t_draw0), (unsigned long)(t1 - t0),
-                     (unsigned long)(t2 - t1), s_rot_angle);
+                     (unsigned long)(t2 - t1), s_rot_angle, (unsigned long)getCpuFrequencyMhz(),
+                     (unsigned long)(getApbFrequency() / 1000000), s_calm ? 1 : 0);
         s_last_base_log = t2;
     }
 }
@@ -1325,6 +1329,20 @@ void ui_show_toast_icon(const char *text, uint32_t duration_ms, uint32_t icon) {
     ui_utf8_trim(s_toast_queue[s_toast_head].text);
     s_toast_queue[s_toast_head].until_ms = millis() + duration_ms;
     s_toast_queue[s_toast_head].icon = icon;
+    s_toast_queue[s_toast_head].badge = false;
+    s_toast_head = next;
+}
+
+void ui_show_toast_badge(uint32_t icon, const char *app, uint32_t duration_ms) {
+    int next = (s_toast_head + 1) % TOAST_QUEUE_SIZE;
+    if (next == s_toast_tail) return;
+    ToastEntry &t = s_toast_queue[s_toast_head];
+    snprintf(t.text, sizeof(t.text), "%s", app ? app : "");
+    ui_utf8_trim(t.text);
+    ui_fit(t.text, 1, 110);
+    t.until_ms = millis() + duration_ms;
+    t.icon = icon;
+    t.badge = true;
     s_toast_head = next;
 }
 
@@ -1346,6 +1364,19 @@ void ui_draw_toast() {
     // Draw the current toast at the top, centered: one line, or two
     // (word-wrapped, the second shortened with "..") for longer text.
     ToastEntry &t = s_toast_queue[s_toast_tail];
+    // Icon only: a small round badge at the top - the app's icon, or its name
+    if (t.badge) {
+        const uint16_t *bi = phone_icon(t.icon);
+        int bw = bi ? 56 : text_width(t.text, 1) + 28, bh = bi ? 56 : 32;
+        int bx = (LCD_WIDTH - bw) / 2, by = bi ? 52 : 62;
+        s_toast_rect_x = bx; s_toast_rect_y = by; s_toast_rect_w = bw; s_toast_rect_h = bh;
+        s_gfx->fillRoundRect(bx, by, bw, bh, bh / 2, COLOR_PANEL);
+        s_gfx->drawRoundRect(bx, by, bw, bh, bh / 2, COLOR_TEXT_DIM);
+        if (bi) phone_image_draw_round(s_gfx, bi, PHONE_ICON_SIZE, PHONE_ICON_SIZE, bx + bw / 2, by + bh / 2, 20);
+        else ui_text_center(bx + bw / 2, by + bh / 2, COLOR_TEXT, t.text, 1);
+        if (now > t.until_ms) s_toast_tail = (s_toast_tail + 1) % TOAST_QUEUE_SIZE;
+        return;
+    }
     // App icon at the left, once the phone has sent it.
     const uint16_t *icon = phone_icon(t.icon);
     const int size = 2, max_w = icon ? 284 : 320, ix = icon ? 34 : 0;

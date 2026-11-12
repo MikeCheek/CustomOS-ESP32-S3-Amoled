@@ -1,5 +1,6 @@
 // What each gesture on the watch face does - see home_gestures.h.
 #include "home_gestures.h"
+#include "dnd.h"
 #include "config.h"
 #include "app_settings_state.h"
 #include "hal_nvs.h"
@@ -37,6 +38,7 @@ static const ActionInfo ACTIONS[HA_COUNT] = {
     {"calendar", "Calendar"},     {"settings", "Settings"},
     {"face", "The face's own"},
     {"wallet", "Wallet"},
+    {"notifmode", "Notification mode"},
 };
 static const char *const SLOT_KEYS[HS_COUNT] = {"tap", "double", "hold", "up", "down", "left", "right", "boot"};
 static const char *const SLOT_NAMES[HS_COUNT] = {"Tap", "Double-tap", "Touch and hold", "Swipe up",
@@ -68,6 +70,7 @@ static const TileInfo TILES[TL_COUNT] = {
     {"activity", "Activity"}, {"weather", "Weather"},     {"next", "Up next"},  {"music", "Music"},
     {"timer", "Timer"},       {"life", "Life"},           {"world", "World clock"}, {"alarm", "Alarm"},
     {"reminders", "Reminders"}, {"battery", "Battery"},
+    {"notif", "Notifications"},
 };
 
 const char *home_action_name(HomeAction a) { return a < HA_COUNT ? ACTIONS[a].name : "Nothing"; }
@@ -176,6 +179,11 @@ void home_run(HomeAction a) {
     case HA_CALENDAR:  open(&calendar_screen); break;
     case HA_SETTINGS:  open(&settings_screen); break;
     case HA_WALLET:    open(&wallet_screen); break;
+    case HA_NOTIF_MODE: {
+        NotifMode m = notif_mode_next();
+        ui_show_toast(m == NM_FULL ? "Notifications in full" : m == NM_ICON ? "Notifications: icon only" : "Notifications silenced", 1500);
+        break;
+    }
     }
 }
 

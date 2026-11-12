@@ -197,6 +197,15 @@ static volatile BleFileState s_file_state = BLE_FILE_IDLE;
 static char s_file_name[64] = {0};
 static int s_file_total_size = 0;
 
+// A finished file set aside while the main loop hasn't saved it yet, so the
+// next transfer can start: the phone doesn't always wait (a wake word is
+// three files back to back - the second used to be lost, and the word
+// never showed up as installed). The main loop sees it first, as COMPLETE.
+static uint8_t *s_held_buf = nullptr;
+static int s_held_len = 0;
+static char s_held_name[64] = {0};
+static volatile bool s_held = false;
+
 // Watchface layout buffer (raw JSON from phone, chunked)
 #define BLE_WATCHFACE_MAX_LEN 4096
 static char *s_watchface_buf = nullptr; // PSRAM, allocated on first layout
@@ -624,7 +633,20 @@ class FileWriteCallback : public NimBLECharacteristicCallbacks {
             }
             return true;
         }
-        if (s_file_state == BLE_FILE_COMPLETE) return true; // waiting to be saved
+        if (s_file_state == BLE_FILE_COMPLETE) {
+            // waiting to be saved: this is the next file's header. Set the
+            // finished one aside and take it - unless one is held already.
+            if (s_held) return true;
+            s_held_buf = s_file_buf;
+            s_held_len = s_file_len;
+            memcpy(s_held_name, s_file_name, sizeof(s_held_name));
+            s_file_buf = nullptr;
+            __sync_synchronize();   // the main loop reads the fields once it sees s_held
+            s_held = true;
+            s_file_state = BLE_FILE_IDLE;
+            s_file_len = 0;
+            DEBUG_PRINTF("[ble] '%s' held until it's saved: next file\n", s_held_name);
+        }
 
         // DENIED: the phone doesn't know and keeps streaming the rest of the
         // file. Those chunks are framed exactly like a new header, so swallow
@@ -1055,27 +1077,29 @@ void ble_consume_media() {
     s_media_len = 0;
 }
 
+// A held file (above) comes first: it's complete, the transfer behind it waits.
 BleFileState ble_file_state() {
-    return s_file_state;
+    return s_held ? BLE_FILE_COMPLETE : s_file_state;
 }
 
 const char *ble_file_name() {
-    return s_file_name;
+    return s_held ? s_held_name : s_file_name;
 }
 
 int ble_file_total_size() {
-    return s_file_total_size;
+    return s_held ? s_held_len : s_file_total_size;
 }
 
 int ble_file_bytes_received() {
-    return s_file_len;
+    return s_held ? s_held_len : s_file_len;
 }
 
 const uint8_t *ble_file_data() {
-    return s_file_buf;
+    return s_held ? s_held_buf : s_file_buf;
 }
 
 void ble_file_approve() {
+    if (s_held) return;   // the held one first
     if (s_file_state == BLE_FILE_PENDING) {
         // If all data was already buffered during PENDING, go straight to COMPLETE
         if (s_file_len >= s_file_total_size && s_file_total_size > 0) {
@@ -1089,6 +1113,7 @@ void ble_file_approve() {
 }
 
 void ble_file_deny() {
+    if (s_held) return;
     if (s_file_state == BLE_FILE_PENDING) {
         s_file_last_ms = millis(); // start draining the rest of the stream
         s_file_state = BLE_FILE_DENIED;
@@ -1115,6 +1140,16 @@ int ble_notify_payload() {
 }
 
 void ble_consume_file() {
+    if (s_held) {   // the held one: the transfer behind it carries on
+        uint8_t *b = s_held_buf;
+        s_held_buf = nullptr;
+        s_held_len = 0;
+        s_held_name[0] = 0;
+        __sync_synchronize();
+        s_held = false;
+        if (b) heap_caps_free(b);
+        return;
+    }
     file_free_buf();
     s_file_state = BLE_FILE_IDLE;
     s_file_len = 0;

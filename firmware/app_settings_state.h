@@ -74,9 +74,13 @@ struct AppSettings {
     int8_t tilt_map_y_from = 1;  // 0 = raw ax, 1 = raw ay
     int8_t tilt_sign_y     = -1;
 
-    // ---- Game audio -----------------------------------------------------
-    // Independent toggles, both exposed in Settings and the quick
-    // top panel — see game_audio.h for how games check these.
+    // ---- Sounds: two switches (Settings > Sound, the control panel) ------
+    // sfx_enabled: SYSTEM sounds - message tunes, reminders, the assistant's
+    //   chimes, workout and navigation beeps, Breathe... everything that
+    //   isn't a game. Alarms, timers, fall alerts and Find my watch ring
+    //   whatever it says.
+    // music_enabled: GAME sounds - the games' music AND their effects
+    //   (beeps, hits, the piano). (The names stay as they were stored in NVS.)
     bool sfx_enabled   = true;
     bool music_enabled = true;
 
@@ -90,6 +94,9 @@ struct AppSettings {
     // Do not disturb: notifications still arrive and go to the history,
     // just without the pop-up toast (app_notifications.cpp).
     bool dnd_on = false;
+    // How a notification shows when it isn't silenced (dnd.h notif_mode):
+    // 0 the full pop-up (icon, who and the text), 1 just the app's icon.
+    uint8_t notif_style = 0;
     bool dnd_bedtime = false;                // DND every night (dnd.cpp)
     uint16_t dnd_from_min = 23 * 60;         // bedtime start, minutes after midnight
     uint16_t dnd_to_min = 7 * 60;            // bedtime end
@@ -162,3 +169,7 @@ struct AppSettings {
 };
 
 extern AppSettings g_app_settings;
+
+// The two sound switches, by what they mean (see sfx_enabled / music_enabled above).
+inline bool system_sounds_on() { return g_app_settings.sfx_enabled; }
+inline bool game_sounds_on() { return g_app_settings.music_enabled; }

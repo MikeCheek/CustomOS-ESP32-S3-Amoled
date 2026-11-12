@@ -209,6 +209,14 @@ final appGroups = <AppGroup>[
       keywords: ['forecast', 'temperature'],
     ),
     AppFeature(
+      'To-dos',
+      'Add, edit and tick off to-dos - yours and the ones from your memos - also on the watch',
+      Icons.task_alt_rounded,
+      AppColors.success,
+      page: () => const ActionsScreen(),
+      keywords: ['todo', 'to do', 'tasks', 'reminders', 'checklist', 'list'],
+    ),
+    AppFeature(
       'Calendar',
       'Agenda and reminders',
       Icons.calendar_month_rounded,

@@ -185,6 +185,30 @@ class NativeService {
     }
   }
 
+  /// Adds an event [minutes] long (alerted 15 minutes before). The event id, or null.
+  Future<int?> addEvent(String title, DateTime at, {int minutes = 60}) async {
+    try {
+      final id = await _method.invokeMethod<int>('addReminder', {
+        'title': title,
+        'begin': at.millisecondsSinceEpoch,
+        'minutes': minutes,
+      });
+      return id != null && id >= 0 ? id : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Moves event [id] to start at [at], keeping its length; false for a
+  /// repeating event, a missing one or no permission.
+  Future<bool> moveEvent(int id, DateTime at) async {
+    try {
+      return await _method.invokeMethod<bool>('moveEvent', {'id': id, 'begin': at.millisecondsSinceEpoch}) ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
   /// The phone's battery: {level (%), charging}.
   Future<Map<String, dynamic>?> battery() async {
     final m = await _method.invokeMethod<Map<dynamic, dynamic>>('getBattery');

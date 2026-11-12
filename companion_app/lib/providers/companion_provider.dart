@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:collection';
 import 'dart:io';
+import 'package:flutter/foundation.dart' show ValueNotifier;
 import 'dart:typed_data';
 import 'package:path_provider/path_provider.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -10,6 +11,10 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../services/ble_protocol.dart';
 import '../services/ble_service.dart';
 import '../services/native_service.dart';
+import '../services/today_brief.dart';
+import '../services/evening_recap.dart';
+import '../services/routines.dart';
+import '../services/weekly_health.dart';
 import '../services/weather_service.dart';
 import '../services/whisper_service.dart';
 import '../services/assistant_intents.dart';
@@ -30,6 +35,8 @@ import '../services/smart_replies.dart';
 import '../services/tts_service.dart';
 import '../services/safety.dart';
 import '../services/notif_ai.dart';
+import '../services/notif_priority.dart';
+import '../services/text_insights.dart';
 import '../services/memo_embeddings.dart';
 
 /// One calendar event instance, in local time.
@@ -228,6 +235,7 @@ class CompanionNotifier extends StateNotifier<CompanionState> {
   final List<StreamSubscription> _subs = [];
   Timer? _weatherTimer;
   Timer? _calendarTimer;
+  Timer? _recapTimer;
   int _stepGoal = 8000;
   String _lastWidget = '';
   // Maneuver icons the watch already has (it caches 12; we track 10).
@@ -259,8 +267,10 @@ class CompanionNotifier extends StateNotifier<CompanionState> {
     _subs.add(_native.dndChanges.listen(_onPhoneDnd, onError: (_) {}));
     _ref.listen(knowledgeProvider, (_, __) => _todosChanged());
     _ref.listen(doneActionsProvider, (_, __) => _todosChanged());
+    _ref.listen(todoEditsProvider, (_, __) => _todosChanged()); // added, edited or removed in the app
     _subs.add(_ble.batteryStream.listen((_) => _pushWidget()));
     _calendarTimer = Timer.periodic(const Duration(minutes: 15), (_) => refreshCalendar());
+    _recapTimer = Timer.periodic(const Duration(minutes: 1), (_) => _maybeRecap());
     Future.delayed(const Duration(seconds: 2), refreshCalendar);
     // A widget left at "Connected" by a process that died: correct it now.
     Future.delayed(const Duration(milliseconds: 500), _pushWidget);
@@ -279,7 +289,10 @@ class CompanionNotifier extends StateNotifier<CompanionState> {
     if (_ble.hasPhoneLink && prev != null) {
       if (prev.bedtimeOn != s.bedtimeOn || prev.bedFrom != s.bedFrom || prev.bedTo != s.bedTo) _sendBedtime();
       if (prev.quickReplies.join('\u0001') != s.quickReplies.join('\u0001')) _sendQuickReplies();
-      if (prev.compSlots.join(',') != s.compSlots.join(',')) _sendComplications();
+      if (prev.compSlots.join(',') != s.compSlots.join(',')) {
+        _sendComplications();
+        _sendBrief(force: true);
+      }
     }
     _native.setAutoForward(s.forwardNotifications, packages: s.notifPackages);
     _native.setCallAlerts(s.callAlerts);
@@ -320,6 +333,9 @@ class CompanionNotifier extends StateNotifier<CompanionState> {
     await _ref.read(lifeProvider.notifier).sendAll(); // the Life plan and today's meal ideas
     _lastTodo = '';
     await _sendTodos();
+    _lastBrief = null;
+    unawaited(_sendBrief());
+    unawaited(_maybeRecap()); // a watch that connects after the time still gets it
     if (_settings.dndSync) {
       final d = await _native.getDnd();
       await _ble.sendLink({'t': 'dnd', 'on': d.on ? 1 : 0});
@@ -363,15 +379,15 @@ class CompanionNotifier extends StateNotifier<CompanionState> {
   String _lastTodo = '';
   Timer? _todoDebounce;
 
-  /// Open to-dos from the memos: the count and first for the watch's "To-dos"
-  /// complication, and the list for its Reminders app (ticked off there:
-  /// [_onWatchTodo]).
+  /// Open to-dos (from the memos, as edited, and added by hand): the count
+  /// and first for the watch's "To-dos" complication, and the list for its
+  /// Reminders app (ticked off there: [_onWatchTodo]).
   Future<void> _sendTodos() async {
     if (!_ble.hasPhoneLink) return;
     final done = _ref.read(doneActionsProvider);
-    final open = _ref.read(knowledgeProvider).actions().where((a) => !done.contains(a.key)).toList();
+    final open = _ref.read(todosProvider).where((a) => !done.contains(a.key)).toList();
     final top = open.isEmpty ? '' : open.first.text;
-    final key = '${open.length}|${open.map((a) => a.key).join('\n')}';
+    final key = '${open.length}|${open.map((a) => '${a.key}\t${a.text}').join('\n')}'; // a reworded one is sent again
     if (key == _lastTodo) return;
     _lastTodo = key;
     await _ble.sendLink({'t': 'todo', 'n': open.length, 'top': top.length > 36 ? top.substring(0, 36) : top});
@@ -401,7 +417,7 @@ class CompanionNotifier extends StateNotifier<CompanionState> {
   /// Ticked off in the watch's Reminders app.
   Future<void> _onWatchTodo(String k) async {
     final done = _ref.read(doneActionsProvider);
-    for (final a in _ref.read(knowledgeProvider).actions()) {
+    for (final a in _ref.read(todosProvider)) {
       if (todoKey(a.key) == k && !done.contains(a.key)) {
         await _ref.read(doneActionsProvider.notifier).toggle(a.key);
         break;
@@ -412,7 +428,69 @@ class CompanionNotifier extends StateNotifier<CompanionState> {
 
   void _todosChanged() {
     _todoDebounce?.cancel();
-    _todoDebounce = Timer(const Duration(seconds: 2), _sendTodos);
+    _todoDebounce = Timer(const Duration(seconds: 2), () async {
+      await _sendTodos();
+      await _sendBrief();
+    });
+  }
+
+  // ---- the "Today" complication (today_brief.dart) ----------------------------------
+
+  TodayBrief? _lastBrief;
+  String _headlineKey = '';
+  String? _headline;
+  DateTime _headlineAt = DateTime(2000);
+  bool _briefBusy = false;
+
+  /// What's left today and the one thing to remember, for the watch face's
+  /// "Today" complication. The language model words it when the complication
+  /// is on the face (it reruns when the day's content changes, or after two
+  /// hours); otherwise, and without a model, the next event / to-do is used.
+  Future<void> _sendBrief({bool force = false}) async {
+    if (!_ble.hasPhoneLink || _briefBusy) return;
+    _briefBusy = true;
+    try {
+      final now = DateTime.now();
+      final events = [for (final e in state.agenda) (e.title, e.start, e.allDay)];
+      final done = _ref.read(doneActionsProvider);
+      final todos = [
+        for (final a in _ref.read(todosProvider))
+          if (!done.contains(a.key)) a.text,
+      ];
+      final memos = [
+        for (final r in _ref.read(notesProvider).recordings)
+          if (r.summary.isNotEmpty && r.recordedAt != null && now.difference(r.recordedAt!).inHours < 24) r,
+      ]..sort((a, b) => b.recordedAt!.compareTo(a.recordedAt!));
+      final memo = memos.firstOrNull;
+      var brief = ruleBrief(now: now, events: events, todos: todos, memoTitle: memo?.title);
+      if (_settings.compSlots.contains('brief')) {
+        final w = state.weather;
+        final prompt = briefPrompt(
+          now: now,
+          events: events,
+          todos: todos,
+          memoSummary: memo?.summary,
+          weather: w == null ? null : '${w.tempC.round()}°C, ${w.condition}',
+        );
+        final key = prompt.substring(prompt.indexOf('\n') + 1); // all but the time
+        if (key != _headlineKey || now.difference(_headlineAt) > const Duration(hours: 2)) {
+          try {
+            final h = cleanHeadline(await GemmaService.instance.todayHeadline(prompt));
+            _headlineKey = key;
+            _headlineAt = now;
+            _headline = h;
+          } catch (e) {
+            debugPrintSafe('[brief] headline failed: $e');
+          }
+        }
+        if (_headline != null) brief = TodayBrief(brief.value, _headline!, brief.line);
+      }
+      if (!force && brief == _lastBrief) return;
+      _lastBrief = brief;
+      await _ble.sendLink(brief.toWatch());
+    } finally {
+      _briefBusy = false;
+    }
   }
 
   Future<void> _sendBedtime() async {
@@ -461,6 +539,9 @@ class CompanionNotifier extends StateNotifier<CompanionState> {
           diagnosticsAt: DateTime.now(),
         );
         break;
+      case 'dict' when e['rw'] is String:
+        unawaited(_rewriteReply(e));
+        break;
       case 'dict':
         await _transcribeReply(
           (e['id'] as num?)?.toInt() ?? 0,
@@ -468,8 +549,14 @@ class CompanionNotifier extends StateNotifier<CompanionState> {
           e['f'] as String? ?? '',
         );
         break;
+      case 'nmode':
+        watchNotifMode.value = (e['m'] as num?)?.toInt() ?? 0;
+        break;
+      case 'asksend':
+        await _sendPending();
+        break;
       case 'ask':
-        await _assistant((e['n'] as num?)?.toInt() ?? 0, e['f'] as String? ?? '');
+        await _assistant((e['n'] as num?)?.toInt() ?? 0, e['f'] as String? ?? '', followUp: e['fu'] == 1);
         break;
       case 'med':
         await _native.mediaCommand(e['a'] as String? ?? '');
@@ -506,6 +593,9 @@ class CompanionNotifier extends StateNotifier<CompanionState> {
             await _ble.sendLink({'t': 'digest', 'err': _clip(err.toString().replaceFirst('Exception: ', ''), 120)});
           }
         }());
+        break;
+      case 'say':
+        unawaited(_sayForWatch(e));
         break;
       case 'tr':
         final trId = (e['id'] as num?)?.toInt() ?? 0;
@@ -690,6 +780,7 @@ class CompanionNotifier extends StateNotifier<CompanionState> {
     } else if (_ble.hasPhoneLink) {
       await _sendAgenda(items);
     }
+    unawaited(_sendBrief());
   }
 
   /// Calendar off / not allowed: the watch forgets its agenda and reminders.
@@ -854,7 +945,8 @@ class CompanionNotifier extends StateNotifier<CompanionState> {
     try {
       await whisper.loadPrefs();
       if (!await whisper.ready()) {
-        return fail('Download the speech model in the companion app first');
+        await fail('Download the speech model in the companion app first');
+        return;
       }
       if (mounted) state = state.copyWith(dictation: 'Receiving voice reply');
       // The watch waits 3 minutes in total; leave time for transcription.
@@ -866,7 +958,10 @@ class CompanionNotifier extends StateNotifier<CompanionState> {
       final text = (await whisper.transcribe(tmp.path)).replaceAll(RegExp(r'\s+'), ' ').trim();
       // whisper marks silence like "[BLANK_AUDIO]" / "(music)"
       final clean = text.replaceAll(RegExp(r'[\[(][^\])]*[\])]'), '').trim();
-      if (clean.isEmpty) return fail('No words recognized - try again');
+      if (clean.isEmpty) {
+        await fail('No words recognized - try again');
+        return;
+      }
       await _ble.sendLink({'t': 'dict', 'id': id, 'n': seq, 'tx': _clip(clean, 300)});
     } catch (e) {
       await fail(_clip(e.toString().replaceFirst('Exception: ', ''), 90));
@@ -884,7 +979,10 @@ class CompanionNotifier extends StateNotifier<CompanionState> {
   /// recording, transcribe it, work out what it asks for - the rules in
   /// assistant_intents.dart first, then the local LLM - do it, and send the
   /// answer back. Timers run on the watch; everything else happens here.
-  Future<void> _assistant(int seq, String file) async {
+  /// The last question and answer from the watch, for a follow-up ("and tomorrow?").
+  ({String q, String a, DateTime at})? _lastAsk;
+
+  Future<void> _assistant(int seq, String file, {bool followUp = false}) async {
     Future<void> status(String st) => _ble.sendLink({'t': 'ask', 'n': seq, 'st': st});
     Future<void> fail(String why) => _ble.sendLink({'t': 'ask', 'n': seq, 'err': why});
     if (file.isEmpty) return fail('Nothing recorded');
@@ -893,9 +991,11 @@ class CompanionNotifier extends StateNotifier<CompanionState> {
     try {
       await whisper.loadPrefs();
       if (!await whisper.ready()) {
-        return fail('Download the speech model in the companion app first');
+        await fail('Download the speech model in the companion app first');
+        return;
       }
       await status('Listening');
+      GemmaService.instance.warmUp(); // loads while the question is received and transcribed
       if (mounted) state = state.copyWith(dictation: 'Assistant: receiving');
       final bytes = await _ref.read(notesProvider.notifier).fetchTemp(file, timeout: const Duration(seconds: 60));
       final dir = await getTemporaryDirectory();
@@ -906,9 +1006,32 @@ class CompanionNotifier extends StateNotifier<CompanionState> {
       final heard = (await whisper.transcribe(
         tmp.path,
       )).replaceAll(RegExp(r'[\[(][^\])]*[\])]'), '').replaceAll(RegExp(r'\s+'), ' ').trim();
-      if (heard.isEmpty) return fail('Didn\'t catch that - try again');
+      if (heard.isEmpty) {
+        await fail('Didn\'t catch that - try again');
+        return;
+      }
       if (mounted) state = state.copyWith(dictation: 'Assistant: "$heard"');
-      final reply = await _assistantReply(heard, () => status('Thinking'));
+      // "yes" to a message waiting to be sent
+      if (followUp &&
+          _pendingSend != null &&
+          RegExp(
+            r"^(yes|yeah|yep|sure|send it|ok|okay|sì|si|certo|invia|mandalo|va bene)\b",
+            caseSensitive: false,
+          ).hasMatch(heard.trim())) {
+        final done = _pendingSend!.done;
+        final ok = await _sendPending();
+        await _ble.sendLink({'t': 'ask', 'n': seq, 'q': _clip(heard, 160), 'a': ok ? '$done.' : 'Couldn\'t do it.'});
+        return;
+      }
+      final prev = _lastAsk;
+      final context = followUp && prev != null && DateTime.now().difference(prev.at).inMinutes < 3 ? prev : null;
+      final reply = await _assistantReply(heard, () => status('Thinking'), previous: context);
+      _lastAsk = (q: heard, a: reply.answer, at: DateTime.now());
+      // Said out loud too when a voice is installed - and then, if follow-ups
+      // are on, the watch listens a few seconds for one.
+      final lang = parseAssistantIntent(heard, DateTime.now()).italian ? 'it' : 'en';
+      final tts = TtsService.instance;
+      final speaks = reply.answer.trim().isNotEmpty && await tts.enabled() && await tts.voiceFor(lang) != null;
       await _ble.sendLink({
         't': 'ask',
         'n': seq,
@@ -916,9 +1039,16 @@ class CompanionNotifier extends StateNotifier<CompanionState> {
         'a': _clip(reply.answer, 360),
         if (reply.timer != null) 'do': 'timer',
         if (reply.timer != null) 's': reply.timer,
+        if (reply.timer == null &&
+            _pendingSend != null &&
+            DateTime.now().difference(_pendingSend!.at).inSeconds < 5) ...{
+          'do': 'send',
+          'lbl': _pendingSend!.label,
+        },
+        if (speaks) 'sp': 1,
+        if (speaks && await tts.followUps()) 'fl': 1,
       });
-      // Then say it on the watch's speaker, when a voice is installed.
-      unawaited(_speakAnswer(reply.answer, parseAssistantIntent(heard, DateTime.now()).italian ? 'it' : 'en'));
+      if (speaks) unawaited(_speakAnswer(reply.answer, lang));
     } catch (e) {
       await fail(_clip(e.toString().replaceFirst('Exception: ', ''), 90));
     } finally {
@@ -949,6 +1079,243 @@ class CompanionNotifier extends StateNotifier<CompanionState> {
     }
   }
 
+  /// The watch asked for something to be said on its speaker (phone_link_say):
+  /// a message read aloud (its translation, if it was translated), the
+  /// morning briefing, the Today card.
+  Future<void> _sayForWatch(Map<String, dynamic> e) async {
+    Future<void> no(String why) => _ble.sendLink({'t': 'say', 'err': why});
+    final tts = TtsService.instance;
+    try {
+      String text;
+      var lang = 'en';
+      switch (e['w']) {
+        case 'notif':
+          final n = NotifAi.instance.byId((e['id'] as num?)?.toInt() ?? 0);
+          if (n == null) {
+            await no('That message is gone from the phone');
+            return;
+          }
+          final tr = n.translation;
+          final body = tr ?? n.text;
+          text = [if (n.title.isNotEmpty) n.title, body].join('. ');
+          text = '${n.app.isEmpty ? '' : '${n.app}. '}$text';
+          final code = tr != null
+              ? Platform.localeName.split(RegExp('[_-]')).first.toLowerCase()
+              : TextInsights.detectLanguage(n.text).code;
+          if (code.isNotEmpty) lang = code;
+        case 'digest':
+          final d = NotifAi.instance.lastDigest;
+          if (d == null || d.trim().isEmpty) {
+            await no('Ask Catch me up first');
+            return;
+          }
+          text = d;
+          lang = _userLangCode();
+        case 'recap':
+          final r = _lastRecap;
+          if (r == null) {
+            await no('No recap yet today');
+            return;
+          }
+          text = r;
+        case 'briefing':
+          if (!await tts.briefingAloud()) return; // off: the card is enough
+          text = (e['x'] as String? ?? '').trim();
+          // in the phone's language when it isn't English (the watch writes it in English)
+          final code = _userLangCode();
+          // (only with a voice for it: an English voice reading Italian is no help)
+          if (code != 'en' && text.isNotEmpty && (await tts.voiceFor(code))?.lang == code) {
+            try {
+              final tr = await GemmaService.instance.translate(text, NotifAi.userLanguage());
+              if (tr != null && tr.trim().isNotEmpty) {
+                text = tr.trim();
+                lang = code;
+              }
+            } catch (_) {} // no model: in English
+          }
+        case 'brief':
+          final b = _lastBrief;
+          if (b == null) {
+            await no('Nothing for today yet');
+            return;
+          }
+          text = [if (b.label.isNotEmpty && b.label != 'Free day') '${b.label}.', b.line].join(' ');
+        default:
+          return;
+      }
+      if (text.trim().isEmpty) return;
+      if (!await tts.enabled()) {
+        await no('Spoken answers are off in the app');
+        return;
+      }
+      final voice = await tts.voiceFor(lang);
+      if (voice == null) {
+        await no('Install a voice in the app (AI models)');
+        return;
+      }
+      final wav = await tts.speak(voice, _clip(text, 360));
+      if (_ble.isConnected) await _ble.sendFile('say:msg.wav', wav);
+    } catch (err) {
+      debugPrintSafe('[say] $err');
+      await no(_clip(err.toString().replaceFirst('Exception: ', ''), 80));
+    }
+  }
+
+  // ---- the evening recap (evening_recap.dart) -------------------------------------------
+
+  String? _lastRecap;
+  bool _recapBusy = false;
+
+  /// Once a day at the time set (or the first time the watch is connected
+  /// after it): the day in a few sentences, sent to the watch (its RECAP card)
+  /// and said on its speaker when a voice is installed.
+  /// [speak]: also say it on the watch (a routine says it as part of its answer instead).
+  /// Returns the recap, or null when it wasn't made.
+  Future<String?> _maybeRecap({bool force = false, bool speak = true}) async {
+    if (_recapBusy || !_ble.hasPhoneLink) return null;
+    final tts = TtsService.instance;
+    final now = DateTime.now();
+    if (!force && (!await tts.recapOn() || !recapDue(now, await tts.recapMinute(), await tts.recapDay()))) return null;
+    _recapBusy = true;
+    try {
+      final today = [
+        for (final r in _ref.read(notesProvider).recordings)
+          if (r.recordedAt != null &&
+              r.recordedAt!.year == now.year &&
+              r.recordedAt!.month == now.month &&
+              r.recordedAt!.day == now.day)
+            r,
+      ]..sort((a, b) => a.recordedAt!.compareTo(b.recordedAt!));
+      final done = _ref.read(doneActionsProvider);
+      final tomorrow = DateTime(now.year, now.month, now.day + 1);
+      final next =
+          state.agenda
+              .where(
+                (e) => e.start.year == tomorrow.year && e.start.month == tomorrow.month && e.start.day == tomorrow.day,
+              )
+              .toList()
+            ..sort((a, b) => a.start.compareTo(b.start));
+      final input = RecapInput(
+        memoTitles: [for (final r in today) r.title.isNotEmpty ? r.title : 'a memo'],
+        memoSummaries: [
+          for (final r in today)
+            if (r.summary.isNotEmpty) r.summary,
+        ],
+        openTodos: [
+          for (final a in _ref.read(todosProvider))
+            if (!done.contains(a.key)) a.text,
+        ],
+        tomorrowFirst: next.isEmpty ? null : (next.first.title, next.first.start, next.first.allDay),
+      );
+      String? text;
+      if (!input.isEmpty) {
+        try {
+          text = cleanRecap(await GemmaService.instance.eveningRecap(recapPrompt(input)));
+        } catch (e) {
+          debugPrintSafe('[recap] model: $e');
+        }
+      }
+      text ??= recapRules(input);
+      // Sundays: the week in health too (weekly_health.dart)
+      if (now.weekday == DateTime.sunday) {
+        final fit = _ref.read(fitnessProvider);
+        final week = weeklyHealth(
+          now,
+          HealthWeekInput(
+            nights: [for (final n in _ref.read(sleepProvider)) (n.morning, n.asleepMin)],
+            days: [
+              if (fit.today != null) (fit.today!.date, fit.today!.steps, fit.today!.exerciseMin),
+              for (final d in fit.days) (d.date, d.steps, d.exerciseMin),
+            ],
+            workouts: [for (final w in fit.workouts) (w.start, w.duration)],
+          ),
+        );
+        if (week != null) text = '$text $week';
+      }
+      _lastRecap = text;
+      await tts.setRecapDay(now.year * 10000 + now.month * 100 + now.day);
+      await _ble.sendLink({'t': 'recap', 'x': _clip(text, 380)});
+      if (speak && await tts.enabled()) {
+        final voice = await tts.voiceFor('en');
+        if (voice != null) {
+          final wav = await tts.speak(voice, _clip(text, 360));
+          if (_ble.isConnected) await _ble.sendFile('say:recap.wav', wav);
+        }
+      }
+      return text;
+    } catch (e) {
+      debugPrintSafe('[recap] $e');
+      return null;
+    } finally {
+      _recapBusy = false;
+    }
+  }
+
+  /// Now, from the app (AI models > Spoken answers).
+  Future<void> recapNow() => _maybeRecap(force: true);
+
+  // ---- routines (routines.dart) ---------------------------------------------------------
+  bool _inRoutine = false;
+
+  /// Runs [r]'s steps as if each were asked in turn: one answer for all of
+  /// them (the recap's text included), and the watch timer to set, if any.
+  Future<({String answer, int? timer})> _runRoutine(Routine r, Future<void> Function() thinking) async {
+    _inRoutine = true;
+    try {
+      final parts = <String>[];
+      int? timer;
+      for (final s in r.steps) {
+        final cmd = stepCommand(s);
+        if (cmd == null) {
+          final recap = await _maybeRecap(force: true, speak: false);
+          if (recap != null) parts.add(recap);
+          continue;
+        }
+        final out = await _assistantReply(cmd, thinking);
+        if (out.timer != null) timer = out.timer;
+        if (out.answer.trim().isNotEmpty) parts.add(out.answer.trim());
+      }
+      return (answer: '${r.name}. ${parts.join(' ')}'.trim(), timer: timer);
+    } finally {
+      _inRoutine = false;
+    }
+  }
+
+  /// Run from the app (AI models > Routines): the answer, and the timer goes to the watch.
+  Future<String> runRoutine(Routine r) async {
+    final out = await _runRoutine(r, () async {});
+    if (out.timer != null && _ble.hasPhoneLink) await _ble.sendLink({'t': 'tmr', 's': out.timer});
+    return out.answer;
+  }
+
+  /// A dictated reply touched up by the language model before it's sent
+  /// ("Shorter", "Friendlier", "Formal" on the watch), in its own language.
+  Future<void> _rewriteReply(Map<String, dynamic> e) async {
+    final id = (e['id'] as num?)?.toInt() ?? 0, seq = (e['n'] as num?)?.toInt() ?? 0;
+    final text = (e['tx'] as String? ?? '').trim();
+    Future<void> err(String why) => _ble.sendLink({'t': 'dict', 'id': id, 'n': seq, 'err': why});
+    try {
+      if (text.isEmpty) return await err('Nothing to rewrite');
+      final out = await GemmaService.instance.rewriteMessage(text, e['rw'] as String);
+      if (out == null) return await err('Install a language model in the app (AI models)');
+      await _ble.sendLink({'t': 'dict', 'id': id, 'n': seq, 'tx': _clip(out, 300)});
+    } catch (x) {
+      await err(_clip(x.toString().replaceFirst('Exception: ', ''), 80));
+    }
+  }
+
+  /// How notifications show on the watch: 0 in full, 1 icon only, 2 silenced
+  /// (dnd.h notif_mode; -1 until the watch says). Set from the Notifications screen.
+  static final watchNotifMode = ValueNotifier<int>(-1);
+
+  Future<void> setWatchNotifMode(int m) async {
+    watchNotifMode.value = m;
+    if (_ble.hasPhoneLink) await _ble.sendLink({'t': 'nmode', 'm': m});
+  }
+
+  /// The phone's language as a 2-letter code ("it", "en").
+  static String _userLangCode() => Platform.localeName.split(RegExp('[_-]')).first.toLowerCase();
+
   Future<void> _speakAnswer(String text, String lang) async {
     try {
       final tts = TtsService.instance;
@@ -969,6 +1336,7 @@ class CompanionNotifier extends StateNotifier<CompanionState> {
     final whisper = WhisperService.instance;
     await whisper.loadPrefs();
     if (!await whisper.ready()) throw Exception('Download a speech model first (AI models)');
+    GemmaService.instance.warmUp(); // loads while it transcribes
     final heard = (await whisper.transcribe(
       wavPath,
     )).replaceAll(RegExp(r'[\[(][^\])]*[\])]'), '').replaceAll(RegExp(r'\s+'), ' ').trim();
@@ -987,9 +1355,19 @@ class CompanionNotifier extends StateNotifier<CompanionState> {
 
   /// What to say back to [heard] (and a watch timer to set, in seconds;
   /// 0 cancels it). [thinking] is called before the LLM is asked.
-  Future<({String answer, int? timer})> _assistantReply(String heard, Future<void> Function() thinking) async {
+  Future<({String answer, int? timer})> _assistantReply(
+    String heard,
+    Future<void> Function() thinking, {
+    ({String q, String a, DateTime at})? previous,
+  }) async {
     final now = DateTime.now();
+    if (!_inRoutine) {
+      final routine = matchRoutine(heard, await Routines.load());
+      if (routine != null) return _runRoutine(routine, thinking);
+    }
     var intent = parseAssistantIntent(heard, now);
+    // A follow-up the rules don't get on their own ("and tomorrow?", "what
+    // about Rome?") goes to the language model with the exchange before it.
     final it = intent.italian;
     String t(String en, String itx) => it ? itx : en;
     final gemma = GemmaService.instance;
@@ -997,7 +1375,11 @@ class CompanionNotifier extends StateNotifier<CompanionState> {
     // Not something the rules know: let the LLM map it to an action or answer.
     if (intent.kind == IntentKind.none) {
       await thinking();
-      final r = await gemma.assistantRoute(heard, now);
+      final r = await gemma.assistantRoute(
+        heard,
+        now,
+        previous: previous == null ? null : 'User: ${previous.q}\nAssistant: ${previous.a}',
+      );
       if (r == null) {
         return (
           answer: t(
@@ -1167,9 +1549,130 @@ class CompanionNotifier extends StateNotifier<CompanionState> {
         final ans = await gemma.ask(q, [for (final c in ctx) c.$2]);
         final text = (ans ?? ctx.first.$1.summary).replaceAll(RegExp(r'\s*\[\d+\]'), '').trim();
         return (answer: text.isEmpty ? ctx.first.$1.displayTitle : text, timer: null);
+      case IntentKind.message:
+        // the newest notification from them that can be answered: the reply goes there
+        final to = (intent.command ?? '').toLowerCase();
+        final since = DateTime.now().subtract(const Duration(hours: 24));
+        final target = NotifAi.instance.recent
+            .where(
+              (n) =>
+                  n.at.isAfter(since) &&
+                  n.canReply &&
+                  (n.title.toLowerCase().contains(to) || n.app.toLowerCase() == to),
+            )
+            .firstOrNull;
+        if (target == null) {
+          return (
+            answer: t(
+              'I can only write to someone whose message is on the phone - nothing recent from ${intent.command}.',
+              'Posso scrivere solo a chi ti ha scritto di recente - niente da ${intent.command}.',
+            ),
+            timer: null,
+          );
+        }
+        final body = intent.text ?? '';
+        _pendingSend = (
+          label: t('Send', 'Invia'),
+          done: t('Sent to ${target.title}', 'Inviato a ${target.title}'),
+          run: () async {
+            await _native.notificationAction(target.id, 'reply', text: body);
+            return true;
+          },
+          at: DateTime.now(),
+        );
+        return (
+          answer: t(
+            'Send to ${target.title} on ${target.app}: "${intent.text}"? Tap Send, or say yes.',
+            'Invio a ${target.title} su ${target.app}: "${intent.text}"? Tocca Invia, o di\' sì.',
+          ),
+          timer: null,
+        );
+      case IntentKind.event:
+        final at = intent.at!, title = intent.text ?? t('Event', 'Evento');
+        final when = '${_dayName(at, now, it)} ${t('at', 'alle')} ${hm(at)}';
+        _pendingSend = (
+          label: t('Add', 'Aggiungi'),
+          done: t('Added: $title, $when', 'Aggiunto: $title, $when'),
+          run: () async => await _native.addEvent(title, at) != null,
+          at: DateTime.now(),
+        );
+        return (
+          answer: t(
+            'Add "$title" $when to your calendar? Tap Add, or say yes.',
+            'Aggiungo "$title" $when al calendario? Tocca Aggiungi, o di\' sì.',
+          ),
+          timer: null,
+        );
+      case IntentKind.moveEvent:
+        // the event: by its old time ("my 3 pm") or by its name, the soonest first
+        final old = intent.command, what = (intent.text ?? '').toLowerCase();
+        final ev = state.agenda.where((e) {
+          if (e.allDay || e.end.isBefore(now)) return false;
+          if (old != null) return hm(e.start) == old;
+          return what.isNotEmpty && e.title.toLowerCase().contains(what);
+        }).firstOrNull;
+        if (ev == null) {
+          return (
+            answer: t(
+              'I couldn\'t find that event in the next two days.',
+              'Non trovo quell\'evento nei prossimi due giorni.',
+            ),
+            timer: null,
+          );
+        }
+        final to = intent.at!;
+        // the event's own day at the new time - unless a later day was named ("to Friday at 10")
+        final sameDay = DateTime(ev.start.year, ev.start.month, ev.start.day, to.hour, to.minute);
+        final daysAway = DateTime(to.year, to.month, to.day).difference(DateTime(now.year, now.month, now.day)).inDays;
+        final dest = daysAway >= 2 ? to : sameDay;
+        final when = '${_dayName(dest, now, it)} ${t('at', 'alle')} ${hm(dest)}';
+        _pendingSend = (
+          label: t('Move', 'Sposta'),
+          done: t('Moved: ${ev.title}, $when', 'Spostato: ${ev.title}, $when'),
+          run: () async {
+            final ok = await _native.moveEvent(ev.id, dest);
+            if (ok) unawaited(refreshCalendar());
+            return ok;
+          },
+          at: DateTime.now(),
+        );
+        return (
+          answer: t(
+            'Move "${ev.title}" from ${hm(ev.start)} to $when? Tap Move, or say yes.',
+            'Sposto "${ev.title}" dalle ${hm(ev.start)} a $when? Tocca Sposta, o di\' sì.',
+          ),
+          timer: null,
+        );
       case IntentKind.none:
         return (answer: '', timer: null);
     }
+  }
+
+  /// Something the assistant waits to do until it's OK'd on the watch (its
+  /// button, labelled [label], or "yes" as a follow-up): a message by voice,
+  /// a new event, an event moved. [done]: what to say once it's done.
+  ({String label, String done, Future<bool> Function() run, DateTime at})? _pendingSend;
+
+  /// Does what waits for its OK; tells the watch how it went.
+  Future<bool> _sendPending() async {
+    final p = _pendingSend;
+    _pendingSend = null;
+    if (p == null || DateTime.now().difference(p.at).inMinutes >= 3) return false;
+    var ok = false;
+    try {
+      ok = await p.run();
+    } catch (_) {}
+    await _ble.sendLink({'t': 'sent', 'ok': ok ? 1 : 0, 'msg': _clip(ok ? p.done : 'Couldn\'t do it', 60)});
+    return ok;
+  }
+
+  static String _dayName(DateTime d, DateTime now, bool it) {
+    final days = DateTime(d.year, d.month, d.day).difference(DateTime(now.year, now.month, now.day)).inDays;
+    if (days == 0) return it ? 'oggi' : 'today';
+    if (days == 1) return it ? 'domani' : 'tomorrow';
+    const en = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+    const itn = ['lunedì', 'martedì', 'mercoledì', 'giovedì', 'venerdì', 'sabato', 'domenica'];
+    return days < 7 ? (it ? itn : en)[d.weekday - 1] : '${d.day}/${d.month}';
   }
 
   /// The LLM's {"tool": ...} as an intent (IntentKind.none for an answer).
@@ -1304,6 +1807,10 @@ class CompanionNotifier extends StateNotifier<CompanionState> {
       final icon = (n['icon'] as num?)?.toInt() ?? 0;
       final pkg = n['package'] as String? ?? '';
       if (icon != 0 && pkg.isNotEmpty) _iconPackages[icon] = pkg;
+      // not worth a buzz (notif_priority.dart): to the watch all the same, quietly
+      final quiet =
+          await NotifPriority.enabled() &&
+          !NotifPriority.isUrgent(app: app, title: title, text: text, canReply: n['canReply'] == true);
       await _ble.sendLink({
         't': 'ntf',
         'id': id,
@@ -1312,6 +1819,7 @@ class CompanionNotifier extends StateNotifier<CompanionState> {
         'tx': _clip(text, 240),
         'rp': n['canReply'] == true ? 1 : 0,
         if (icon != 0) 'ic': icon,
+        if (quiet) 'q': 1,
       });
       if (n['canReply'] == true && text.isNotEmpty) unawaited(_suggestReplies(id, app, title, text));
     } else {
@@ -1456,6 +1964,7 @@ class CompanionNotifier extends StateNotifier<CompanionState> {
     }
     _weatherTimer?.cancel();
     _calendarTimer?.cancel();
+    _recapTimer?.cancel();
     super.dispose();
   }
 }

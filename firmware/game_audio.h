@@ -1,8 +1,9 @@
 /*
  * game_audio.h
  * Shared sound-effect + background-music helpers for games, so each
- * game file doesn't duplicate raw frequencies or check
- * g_app_settings.sfx_enabled/music_enabled itself.
+ * game file doesn't duplicate raw frequencies or check the sound switch
+ * itself: game effects AND music follow "Game sounds" (game_sounds_on(),
+ * g_app_settings.music_enabled); "System sounds" is everything else.
  */
 #pragma once
 #include <stdint.h>

@@ -1,5 +1,6 @@
 // Activity rings - see fitness.h.
 #include "haptics.h"
+#include "psram_static.h"
 #include "fitness.h"
 #include "store.h"
 #include "phone_link.h"
@@ -27,7 +28,7 @@ static uint32_t s_date = 0;            // yyyymmdd of the values above
 // The days before today, newest first: 90 in the store (store.h), 7 in NVS
 // when there's nowhere else.
 static const int HIST_MAX = 90;
-static FitDay   s_hist[HIST_MAX];
+PS_ARRAY(FitDay, s_hist, [HIST_MAX]);
 static int      s_hist_n = 0;
 static bool     s_hist_dirty = false;
 static int hist_cap() { return store_ok() ? HIST_MAX : 7; }

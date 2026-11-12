@@ -25,7 +25,7 @@ strips the last 72 bytes and sends the signature with `0x05`.
 | `0003` | Time | phone → watch | 7 bytes: year-2000, month, day, hour, minute, second, 0 |
 | `0004` | Contacts | phone → watch | JSON array `[{"name","phone","email"}]`, framed (see below); a write starting with `[` is a whole list |
 | `0005` | Media (legacy) | phone → watch | JSON `{"title","artist","album","playing","position","duration"}` |
-| `0006` | File / data | phone → watch | prefix `0x01` watchface JSON (first chunk: `0x01` + total len 2 LE + data, then `0x01` + data), `0x02` weather JSON, `0x03` fitness JSON, otherwise a file transfer: header `nameLen(4 LE) totalSize(4 LE) name`, chunks `len(4 LE) offset(4 LE) data`. Files up to 4 MB, accepted on the watch (bigger: Wi-Fi `/put`). A name `rec:<name>.wav`/`.mp3` (up to 4 MB) is saved into /Recordings. A name `wn:<model>/<file>` (`wn9_*` model, file `wn9_data`, `wn9_index` or `_MODEL_INFO_`, sent in that order) is a wake word saved into /srmodels/<model>/ without asking. The command model goes the same way: `wn:mn7_en/<file>` with `mn7_data`, `mn7_index`, then `_MODEL_INFO_` (MultiNet7 English, ~2.7 MB). A name `pf:<name>.pwf` (name: up to 20 letters, digits, `_`, `-`; the format in firmware/app_photo_watchface.h) is a photo watch face saved as /faces/photos/<name>.pwf without asking and shown at once (up to 20 of them). A name `pt:<name>.txt` (up to 16 KB, the format of firmware/piano_songs.h) is a Piano Tiles song saved into /piano/ without asking. A name `say:<x>.wav` (16 kHz mono, up to 1 MB) is the assistant's answer spoken: saved as /Recordings/_say.wav and played if the assistant is still open |
+| `0006` | File / data | phone → watch | prefix `0x01` watchface JSON (first chunk: `0x01` + total len 2 LE + data, then `0x01` + data), `0x02` weather JSON, `0x03` fitness JSON, otherwise a file transfer: header `nameLen(4 LE) totalSize(4 LE) name`, chunks `len(4 LE) offset(4 LE) data`. Files up to 4 MB, accepted on the watch (bigger: Wi-Fi `/put`). A name `rec:<name>.wav`/`.mp3` (up to 4 MB) is saved into /Recordings. A name `wn:<model>/<file>` (`wn9_*` model, file `wn9_data`, `wn9_index` or `_MODEL_INFO_`, sent in that order) is a wake word saved into /srmodels/<model>/ without asking; after each file the watch answers `{"e":"wnf","f":"<model>/<file>","ok":1}` (fw 3.5+; after `_MODEL_INFO_` also `"inst":1` once the model is complete, `0` when a file is missing), and the app waits for that before the next file. The command model goes the same way: `wn:mn7_en/<file>` with `mn7_data`, `mn7_index`, then `_MODEL_INFO_` (MultiNet7 English, ~2.7 MB). A name `pf:<name>.pwf` (name: up to 20 letters, digits, `_`, `-`; the format in firmware/app_photo_watchface.h) is a photo watch face saved as /faces/photos/<name>.pwf without asking and shown at once (up to 20 of them). A name `pt:<name>.txt` (up to 16 KB, the format of firmware/piano_songs.h) is a Piano Tiles song saved into /piano/ without asking. A name `say:<x>.wav` (16 kHz mono, up to 1 MB) is the assistant's answer spoken: saved as /Recordings/_say.wav and played if the assistant is still open |
 | `0007` | Notes | both | phone writes `0x01` list, `0x02`+name download, `0x03`+name delete, `0x05` next chunk (`0x05`+n = n more chunks: the app keeps a window of chunks in flight), transcript as `0x06`+total(2 LE)+data then `0x07`+data. Watch notifies `0x10` list header, `0x11` list chunk, `0x12` file chunk, `0x13` done |
 | `0008` | Controller | phone → watch | 2 bytes: d-pad bits, button bits |
 | `0009` | **Phone link** | both | JSON messages, framed (see below) |
@@ -51,7 +51,7 @@ Phone → watch (`"t"` = type):
 | `{"t":"hi"}` | app connected; the watch answers with `{"e":"hi",...}` |
 | `{"t":"bat","l":85,"c":1}` | phone battery %, charging |
 | `{"t":"med","ti":"Song","ar":"Artist","pl":1,"po":12,"du":200,"v":7,"vm":15,"ah":456}` | now playing: title, artist, playing, position s, duration s, volume, max volume, album cover hash (optional) |
-| `{"t":"ntf","id":123,"ap":"WhatsApp","ti":"Mario","tx":"Ciao!","rp":1,"ic":789}` | notification; `rp` = can be replied to, `ic` = app icon hash (optional). Same `id` again updates it |
+| `{"t":"ntf","id":123,"ap":"WhatsApp","ti":"Mario","tx":"Ciao!","rp":1,"ic":789}` | notification; `rp` = can be replied to, `ic` = app icon hash (optional), `q`: 1 = not urgent - listed without a toast or a buzz ("Buzz only for what matters" in the app). Same `id` again updates it |
 | `{"t":"nrm","id":123}` | notification removed on the phone |
 | `{"t":"call","st":"ring"\|"active"\|"end","id":456,"n":"Mario"}` | call state; `ring` opens the call screen and wakes the watch |
 | `{"t":"find","on":0}` | find-my-phone stopped on the phone side |
@@ -63,7 +63,10 @@ Phone → watch (`"t"` = type):
 | `{"t":"crash"}` / `{"t":"crash","clr":1}` | send diagnostics (and clear the crash report) |
 | `{"t":"dict","id":123,"n":1,"tx":"text"}` / `{"t":"dict","id":123,"n":1,"err":"why"}` | voice reply transcription result (`n` echoes the watch's attempt number) |
 | `{"t":"ask","n":1,"st":"Thinking"}` | voice assistant progress (shown while the watch waits) |
-| `{"t":"ask","n":1,"q":"heard","a":"answer","do":"timer","s":300}` / `{"t":"ask","n":1,"err":"why"}` | voice assistant result; `do`/`s` optional: `timer` sets the watch timer to `s` seconds (0 cancels) |
+| `{"t":"ask","n":1,"q":"heard","a":"answer","do":"timer","s":300}` / `{"t":"ask","n":1,"err":"why"}` | voice assistant result; `do`/`s` optional: `timer` sets the watch timer to `s` seconds (0 cancels). `"sp":1`: the answer is being said (a `say:` file follows); `"fl":1` too: once it has played, the watch listens 4 s for a follow-up |
+| `{"t":"recap","x":"A calm day..."}` | the evening recap (at the time set in the app, or when the watch connects after it): kept for the Smart Stack's RECAP card until 4:00, and said right after (a `say:recap.wav` file) |
+| `{"t":"nmode","m":1}` | how notifications show on the watch: 0 in full (icon, who, text), 1 icon only, 2 silenced (Do not disturb). The watch answers `{"e":"nmode","m":n}` after `hi` and whenever it changes there (the control panel's button, Settings, the Tile, a home gesture) |
+| `{"t":"say","err":"why"}` | the phone couldn't say what the watch asked for (`e:"say"`): no voice installed, the message is gone... shown as a toast |
 
 Watch → phone (`"e"` = event):
 
@@ -73,7 +76,10 @@ Watch → phone (`"e"` = event):
 | `{"e":"wifi","st":"ready","ip":"192.168.1.20","port":8080,"k":"<key>"}` / `{"e":"wifi","st":"err","why":"..."}` / `{"e":"wifi","st":"off"}` | Wi-Fi transfer server state |
 | `{"e":"crash","id":7,"txt":"...","sys":"..."}` | diagnostics: last crash report (`txt`, empty if none) and system status text |
 | `{"e":"dict","id":123,"n":1,"f":"_reply.wav"}` | voice reply recorded: download `f` with the notes characteristic, transcribe, answer with `t:"dict"` |
-| `{"e":"ask","n":1,"f":"_ask.wav"}` | voice assistant question recorded: download `f`, transcribe, act on it, answer with `t:"ask"` |
+| `{"e":"dict","id":123,"n":2,"rw":"short","tx":"text"}` | the transcribed reply touched up by the language model before it's sent: `rw` is `short`, `friendly` or `formal`; answered with `t:"dict"` (the new text, or `err` - the old text stays) |
+| `{"e":"asksend"}` | the OK to something the assistant waits to do: a message by voice, a new calendar event, an event moved (its answer had `"do":"send"` and `"lbl"`, the button's label: Send / Add / Move); "yes" said as a follow-up does the same. The phone answers `{"t":"sent","ok":1,"msg":"Added: Dinner, Friday at 20:00"}` (older apps: `"to"`) |
+| `{"e":"ask","n":1,"f":"_ask.wav"}` | voice assistant question recorded: download `f`, transcribe, act on it, answer with `t:"ask"`. `"fu":1`: a follow-up to the last answer (no wake word), answered in its context |
+| `{"e":"say","w":"notif","id":7}` / `{"e":"say","w":"briefing","x":"Good morning..."}` / `{"e":"say","w":"brief"}` / `{"e":"say","w":"digest"}` / `{"e":"say","w":"recap"}` | say something on the watch's speaker (also Catch me up's summary and tonight's recap): a message (held on the watch; its translation if it has one), the morning briefing (when "Read the morning briefing aloud" is on), the Today card. The answer is a `say:msg.wav` file, played for the next minute, or `t:"say"` with `err` |
 | `{"e":"req"}` | please resend battery + now playing |
 | `{"e":"img","k":"i"\|"a","h":789}` | send this app icon / album cover (as `0x03` frames); asked once per image, again after 20 s if nothing came |
 | `{"e":"med","a":"toggle"\|"next"\|"prev"\|"volUp"\|"volDown"}` | media control |
@@ -177,7 +183,7 @@ uses it. While a Wi-Fi transfer runs, `scan`/`set`/`test` reply `ok:0` with a re
 | watch → phone | `{"e":"usage","p":0,"iv":10,"bat":"5251ff...","chg":"0001..."}` | the battery every 10 min over 24 h, oldest first, two hex digits each (`ff` = no sample), and charging per sample |
 | watch → phone | `{"e":"usage","p":1,"on":[...24],"wk":[...24],"ony":[...24]}` | screen-on seconds and wake-ups per hour today, screen-on yesterday |
 | watch → phone | `{"e":"usage","p":2,"apps":[["Music",1234],...],"wake":64,"disc":2,"ntf":41,"boot":12,"crash":0,"heap":61,"psram":7100,"sd":[30436,4210],"up":52000,"rr":"Power on"}` | seconds per app today (top 12), counters, lowest free internal RAM (KB), free PSRAM (KB), SD total/used (MB), uptime, last reset |
-| watch → phone | `{"e":"usage","p":3,"off":36000,"pm":1,"aw":{"wakeword":30000,"gps":600}}` | what kept the watch from sleeping deeply with the screen off today (unplugged), seconds each: `build` (no power management in this firmware), `setting` (Deep sleep off), `wakeword`, `aod`, `gps`, `wifi`, `espnow`, `audio`, `usbmode`; `off`: seconds with the screen off; `pm`: 1 when the firmware has power management (fw 3.5+) |
+| watch → phone | `{"e":"usage","p":3,"off":36000,"pm":1,"aw":{"wakeword":30000,"gps":600}}` | what kept the watch from sleeping deeply with the screen off today (unplugged), seconds each: `build` (no power management in this firmware), `setting` (Deep sleep off), `wakeword`, `aod`, `gps`, `wifi`, `espnow`, `audio`, `usbmode`; `off`: seconds with the screen off; `pm`: 1 when the firmware has power management (fw 3.5+); `ft`: `{"speaker":s,"mic":s,"gps":s,"wifi":s}`, how long each was in use today (unplugged), for Diagnostics' battery cost per feature |
 | watch → phone | `{"e":"usage","p":4,"wk":[[20261103,95,120,38,1],...]}` | the last 7 days, newest first: date, screen-on minutes, wake-ups, battery % used unplugged, times charged (fw 3.5+) |
 | watch → phone | `{"e":"fh","h":[[20260801,312,24,9,6482],...]}` | after `hi`: the activity days past the status report's 7 (up to 90), 15 a message - same rows as `fh` in the report |
 | watch → phone | `{"e":"lh","h":[[...],...]}` | after the `life` report: the Life days past its 7 (up to 90), 15 a message - same rows as its `h` |
@@ -200,10 +206,11 @@ sounds; incoming calls still ring.
 |---|---|---|
 | phone → watch | `{"t":"comp","s":["steps","next_event","battery"]}` | the 3 slots on the Default/Minimal faces, left to right |
 | phone → watch | `{"t":"todo","n":4,"top":"Call Marco"}` | open to-dos from the voice memos (for the `todos` complication) |
+| phone → watch | `{"t":"brief","v":"3","l":"Call Marco first","x":"2 events left: ..."}` | the `brief` ("Today") complication: things left today (`-`: none) and the one to keep in mind, worded by the phone's language model when the complication is on the face, else the next event / to-do |
 | phone → watch | `{"t":"todos","r":1,"l":[{"k":"9f3a01bc","x":"Call Marco"},...]}` … `{"t":"todos","l":[...],"done":1}` | the open to-dos for the Reminders app (fw 3.5+), 7 per message; `r` starts a new list, `done` replaces the watch's. `k` = FNV-1a of the to-do's key, 8 hex digits |
 | watch → phone | `{"e":"todo","k":"9f3a01bc","d":1}` | ticked off on the watch; the phone marks it done and sends the list again |
 
 Keys: `none`, `steps`, `battery`, `phone_battery`, `next_event`, `weather`, `notifications`, `navigation`, `todos`,
-`seconds`. Custom watchface JSON: `{"type":"complication","dataSrc":"next_event","x":120,"y":330,"radius":42}`.
+`seconds`, `rings`, `brief`. Custom watchface JSON: `{"type":"complication","dataSrc":"next_event","x":120,"y":330,"radius":42}`.
 
 Firmware update end status `0x84` 11 = image older than the installed firmware (only when signed updates are on).
