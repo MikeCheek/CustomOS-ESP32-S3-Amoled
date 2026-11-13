@@ -960,7 +960,7 @@ void loop() {
         // 250 ms: the touch controller's interrupt and BOOT wake the chip
         // at once anyway; this only paces the polling (raise to wake, the
         // PMU, the phone link) - fewer wake-ups in light sleep.
-        if (notes_download_active() || wifi_xfer_active()) delay(4);   // a transfer is running: keep it moving
+        if (notes_download_active() || wifi_xfer_active() || ota_active()) delay(4);   // a transfer is running: keep it moving
         else if (keep_awake || !power_light_sleep(250)) delay(keep_awake ? 150 : 250);
         return;
     }
