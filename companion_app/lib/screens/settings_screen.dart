@@ -156,6 +156,23 @@ class SettingsScreen extends ConsumerWidget {
                   value: s.navigationToWatch,
                   onChanged: (v) => setter.update(s.copyWith(navigationToWatch: v)),
                 ),
+              // the phone's location stream is Android code (PhoneBridge.kt)
+              if (!isIos)
+                ToggleRow(
+                  icon: Icons.route_rounded,
+                  color: AppColors.success,
+                  title: 'Phone GPS',
+                  subtitle: 'Distance for outdoor workouts on a watch without GPS',
+                  value: s.phoneGpsWorkouts,
+                  onChanged: (v) async {
+                    await setter.update(s.copyWith(phoneGpsWorkouts: v));
+                    if (!v) return;
+                    // "All the time": the walk goes on with the phone in a pocket, screen off
+                    if (await Permission.locationWhenInUse.request().isGranted) {
+                      await Permission.locationAlways.request();
+                    }
+                  },
+                ),
               NavRow(
                 icon: Icons.do_not_disturb_on_outlined,
                 color: AppColors.accent2,

@@ -18,6 +18,7 @@ class AppSettings {
   final bool calendarToWatch;
   final int reminderMinutes; // 0 = no reminders on the watch
   final bool navigationToWatch;
+  final bool phoneGpsWorkouts; // outdoor workouts on a watch without GPS: distance from the phone's
   final bool wifiTransfers; // recordings over Wi-Fi when the watch can
   final bool autoProcess; // after a sync: transcribe + summarize new memos
   final bool freeWatch; // delete a memo on the watch once it's safely on the phone
@@ -43,6 +44,7 @@ class AppSettings {
     this.calendarToWatch = true,
     this.reminderMinutes = 10,
     this.navigationToWatch = true,
+    this.phoneGpsWorkouts = true,
     this.wifiTransfers = true,
     this.autoProcess = false,
     this.freeWatch = false,
@@ -70,6 +72,7 @@ class AppSettings {
     bool? calendarToWatch,
     int? reminderMinutes,
     bool? navigationToWatch,
+    bool? phoneGpsWorkouts,
     bool? wifiTransfers,
     bool? autoProcess,
     bool? freeWatch,
@@ -96,6 +99,7 @@ class AppSettings {
       calendarToWatch: calendarToWatch ?? this.calendarToWatch,
       reminderMinutes: reminderMinutes ?? this.reminderMinutes,
       navigationToWatch: navigationToWatch ?? this.navigationToWatch,
+      phoneGpsWorkouts: phoneGpsWorkouts ?? this.phoneGpsWorkouts,
       wifiTransfers: wifiTransfers ?? this.wifiTransfers,
       autoProcess: autoProcess ?? this.autoProcess,
       freeWatch: freeWatch ?? this.freeWatch,
@@ -133,6 +137,7 @@ class SettingsNotifier extends StateNotifier<AppSettings> {
       calendarToWatch: p.getBool('calendar_to_watch') ?? true,
       reminderMinutes: p.getInt('reminder_minutes') ?? 10,
       navigationToWatch: p.getBool('navigation_to_watch') ?? true,
+      phoneGpsWorkouts: p.getBool('phone_gps_workouts') ?? true,
       wifiTransfers: p.getBool('wifi_transfers') ?? true,
       autoProcess: p.getBool('auto_process') ?? false,
       freeWatch: p.getBool('free_watch') ?? false,
@@ -162,6 +167,7 @@ class SettingsNotifier extends StateNotifier<AppSettings> {
     await p.setBool('calendar_to_watch', next.calendarToWatch);
     await p.setInt('reminder_minutes', next.reminderMinutes);
     await p.setBool('navigation_to_watch', next.navigationToWatch);
+    await p.setBool('phone_gps_workouts', next.phoneGpsWorkouts);
     await p.setBool('wifi_transfers', next.wifiTransfers);
     await p.setBool('auto_process', next.autoProcess);
     await p.setBool('free_watch', next.freeWatch);
@@ -192,6 +198,7 @@ class SettingsNotifier extends StateNotifier<AppSettings> {
       calendarToWatch: state.calendarToWatch,
       reminderMinutes: state.reminderMinutes,
       navigationToWatch: state.navigationToWatch,
+      phoneGpsWorkouts: state.phoneGpsWorkouts,
       wifiTransfers: state.wifiTransfers,
       autoProcess: state.autoProcess,
       freeWatch: state.freeWatch,

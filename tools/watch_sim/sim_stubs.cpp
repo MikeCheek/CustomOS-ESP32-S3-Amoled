@@ -80,6 +80,8 @@ void imu_get_calibrated_tilt(const ImuSample &sample, float &tilt_x, float &tilt
 }
 uint32_t imu_get_step_count() { return g_sim.steps; }
 void imu_step_counter_update(const ImuSample &) {}
+void imu_step_feed(float, float, float, uint32_t) {}
+bool imu_hw_pedometer() { return true; }
 TouchPoint touch_read() { return { false, 0, 0 }; }
 bool touch_read_raw(uint16_t &, uint16_t &) { return false; }
 // Swipes, classified like hal_touch.cpp's evaluate_swipe() from the

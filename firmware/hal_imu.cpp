@@ -262,15 +262,24 @@ void imu_steps_poll() {
 }
 
 // Software step detection - only used when the hardware pedometer isn't.
-void imu_step_counter_update(const ImuSample &sample) {
-    if (s_hw_ped || !sample.valid) return;
+// Fed every sample by motion_update() while the sampler runs (it does
+// whenever software steps are needed); the watch face's once-a-frame
+// imu_read() fed it before, so steps were only counted while the face was
+// showing - none during a workout.
+bool imu_hw_pedometer() { return s_hw_ped; }
 
-    float mag = sqrtf(sample.ax * sample.ax + sample.ay * sample.ay + sample.az * sample.az);
+void imu_step_counter_update(const ImuSample &sample) {
+    if (s_sampling || !sample.valid) return;   // the sampler feeds imu_step_feed() instead
+    imu_step_feed(sample.ax, sample.ay, sample.az, millis());
+}
+
+void imu_step_feed(float ax, float ay, float az, uint32_t now) {
+    if (s_hw_ped) return;
+    float mag = sqrtf(ax * ax + ay * ay + az * az);
     const float THRESH_HIGH = 1.15f;
     const float THRESH_LOW = 0.95f;
     const uint32_t MIN_STEP_INTERVAL_MS = 300;
 
-    uint32_t now = millis();
     if (!s_rising && mag > THRESH_HIGH) {
         s_rising = true;
     } else if (s_rising && mag < THRESH_LOW) {

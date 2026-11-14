@@ -312,10 +312,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # 21: AGP 9's lint (lintVitalAnalyzeRelease) calls JDK 21 APIs
+      # (List.removeLast) and crashes on 17. The app still targets Java 17.
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: "17"
+          java-version: "21"
 
       - uses: subosito/flutter-action@v2
         with:
@@ -331,8 +333,10 @@ jobs:
           # The app's NDK, plus Flutter's default one that plugins (e.g. jni)
           # build with - otherwise Gradle downloads it mid-build, and a bad
           # download there fails the job ("Archive is not a ZIP archive").
+          # Only the plugin's own sources (src/main): its tests hold made-up
+          # versions (29.0.0, ...) that sdkmanager can't find.
           NDKS=$( { grep -oP 'ndkVersion\s*=\s*"\K[^"]+' companion_app/android/app/build.gradle.kts
-                    grep -rhoP 'ndkVersion\s*(:\s*String)?\s*=\s*"\K[0-9.]+' "$FLUTTER_ROOT/packages/flutter_tools/gradle" ; } 2>/dev/null | sort -u)
+                    grep -rhoP 'ndkVersion\s*(:\s*String)?\s*=\s*"\K[0-9.]+' "$FLUTTER_ROOT/packages/flutter_tools/gradle/src/main" ; } 2>/dev/null | sort -u)
           SDKM="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
           yes | "$SDKM" --licenses > /dev/null || true
           for NDK in $NDKS; do
