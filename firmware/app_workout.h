@@ -19,11 +19,13 @@
 #pragma once
 #include "ui.h"
 #include "motion_detect.h"
+#include <ArduinoJson.h>
 
 void workout_init();
 void workout_update();                         // loop()
 void workout_feed(Activity a, int cadence);    // every 5 s window (motion_update)
 void workout_on_ack(uint32_t start);           // phone link "woack"
+void workout_on_phone_pos(JsonDocument &doc);  // phone link "wopos": distance from the phone's GPS
 void workout_send_pending();                   // phone link "hi"
 
 bool workout_active();

@@ -43,6 +43,13 @@ static uint32_t s_stretch_ms = 0;      // millis() the current (unpaused) stretc
 static uint32_t s_steps = 0, s_last_steps = 0;
 static float    s_gps_m = 0;
 static bool     s_gps_used = false, s_gps_was_on = false;
+// No GPS on the watch: an outdoor workout's distance comes from the phone's
+// (the app's WorkoutGps), as a running total the phone sends every 5 s.
+static bool     s_phone_used = false;    // asked the phone for it
+static float    s_phone_m = 0;           // counted (paused stretches left out)
+static uint32_t s_phone_last = 0;        // the phone's last total
+static char     s_phone_err[48] = "";    // why the phone has none, for the screen
+static void phone_gps(bool on);
 static double   s_last_lat = 0, s_last_lon = 0;
 static bool     s_have_last = false;
 static uint32_t s_last_sec_ms = 0;
@@ -57,6 +64,7 @@ const char *workout_type_name() { return TYPES[s_type].name; }
 
 float workout_km() {
     if (s_gps_used && s_gps_m > 0) return s_gps_m / 1000.0f;
+    if (s_phone_used && s_phone_m > 0) return s_phone_m / 1000.0f;
     return s_steps * TYPES[s_type].stride_m * fitness_stride_scale() / 1000.0f;
 }
 
@@ -65,7 +73,8 @@ static float workout_kcal() {
     return per_min * workout_elapsed_s() / 60.0f;
 }
 
-static bool has_distance() { return TYPES[s_type].stride_m > 0 || (s_gps_used && s_gps_m > 0); }
+static bool gps_distance() { return (s_gps_used && s_gps_m > 0) || (s_phone_used && s_phone_m > 0); }
+static bool has_distance() { return TYPES[s_type].stride_m > 0 || gps_distance(); }
 
 // ---- saved ones ------------------------------------------------------------------------------------
 struct WoRecord {
@@ -127,6 +136,7 @@ static bool send_record(const WoRecord &r) {
 void workout_send_pending() {
     for (int i = 0; i < s_rec_n; i++)
         if (!(s_rec[i].flags & 1)) send_record(s_rec[i]);
+    if (s_on && s_phone_used) phone_gps(true);   // back after a disconnect: the phone carries on
 }
 
 void workout_on_ack(uint32_t start) {
@@ -135,7 +145,27 @@ void workout_on_ack(uint32_t start) {
 }
 
 // ---- start, pause, end -----------------------------------------------------------------------------
+static void phone_gps(bool on) {
+    JsonDocument d;
+    d["e"] = "wogps";
+    d["on"] = on ? 1 : 0;
+    d["st"] = s_start_epoch;   // which workout: the same one again after a reconnect
+    phone_link_send(d);
+}
+
+void workout_on_phone_pos(JsonDocument &doc) {
+    if (!s_on || !s_phone_used || (doc["st"] | 0u) != s_start_epoch) return;
+    const char *err = doc["err"] | "";
+    snprintf(s_phone_err, sizeof(s_phone_err), "%s", err);
+    if (doc["m"].isNull()) return;
+    uint32_t m = doc["m"] | 0u;
+    if (m < s_phone_last) s_phone_last = 0;   // the phone started counting again
+    if (!s_paused) s_phone_m += (float)(m - s_phone_last);
+    s_phone_last = m;
+}
+
 static void gps_on(bool on) {
+    if (!on && s_phone_used) { phone_gps(false); s_phone_used = false; }
 #if FEATURE_GPS
     if (on) {
         s_gps_used = TYPES[s_type].outdoor && gps_available();
@@ -146,9 +176,12 @@ static void gps_on(bool on) {
         gps_disable();
     }
 #else
-    (void)on;
     s_gps_used = false;
 #endif
+    if (on && !s_gps_used && TYPES[s_type].outdoor) {   // no GPS here: the phone's
+        s_phone_used = true;
+        phone_gps(true);
+    }
 }
 
 // back_s: started that long ago (a detected workout counts from its start)
@@ -162,6 +195,9 @@ static void start(int type, uint32_t back_s, uint32_t back_steps) {
     s_steps = back_steps;
     s_last_steps = imu_get_step_count();
     s_gps_m = 0;
+    s_phone_m = 0;
+    s_phone_last = 0;
+    s_phone_err[0] = 0;
     s_have_last = false;
     s_still_windows = 0;
     s_prompted_end = false;
@@ -186,7 +222,7 @@ static void finish() {
     if (!s_on) return;
     set_paused(true);
     WoRecord r = {s_start_epoch, workout_elapsed_s(), (uint32_t)(workout_km() * 1000), s_steps, (uint16_t)workout_kcal(),
-                  (uint8_t)s_type, (uint8_t)(s_gps_used && s_gps_m > 0 ? 2 : 0)};
+                  (uint8_t)s_type, (uint8_t)(gps_distance() ? 2 : 0)};
     if (!has_distance()) r.dist_m = 0;
     s_on = false;
     s_paused = false;
@@ -357,7 +393,8 @@ static void list_draw() {
 #if FEATURE_GPS
         gps = TYPES[i].outdoor && gps_available();
 #endif
-        ui_print(CX - 96, y + ROW / 2 + 8, 1, COLOR_TEXT_DIM, gps ? "GPS distance" : TYPES[i].stride_m > 0 ? "Distance from steps" : "Time and calories");
+        ui_print(CX - 96, y + ROW / 2 + 8, 1, COLOR_TEXT_DIM,
+                 gps ? "GPS distance" : TYPES[i].outdoor ? "Phone GPS distance" : TYPES[i].stride_m > 0 ? "Distance from steps" : "Time and calories");
     }
     g->fillRect(0, 0, LCD_WIDTH, 84, COLOR_BG);
 }
@@ -417,7 +454,10 @@ static void live_draw() {
         float km = workout_km();
         snprintf(b, sizeof(b), "%.2f", km);
         ui_print(CX - 150, y, 4, COLOR_TEXT, b);
-        ui_print(CX - 150 + ui_text_width(b, 4) + 8, y + 12, 1, COLOR_ACCENT2, s_gps_used && s_gps_m > 0 ? "KM (GPS)" : "KM");
+        ui_print(CX - 150 + ui_text_width(b, 4) + 8, y + 12, 1, COLOR_ACCENT2,
+                 s_gps_used && s_gps_m > 0 ? "KM (GPS)" : s_phone_used && s_phone_m > 0 ? "KM (PHONE GPS)" : "KM");
+        // no distance from the phone yet: say why (location off, not allowed...)
+        if (s_phone_used && s_phone_m <= 0 && s_phone_err[0]) ui_print(CX - 150, y + 40, 1, COLOR_TEXT_DIM, s_phone_err);
         y += 52;
         fmt_pace(b, sizeof(b), el, km);
         ui_print(CX - 150, y, 4, COLOR_TEXT, b);

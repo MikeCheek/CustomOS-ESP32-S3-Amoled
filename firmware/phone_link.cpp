@@ -228,6 +228,8 @@ static void handle(const char *msg) {
         sos_on_reply((doc["ok"] | 0) != 0, doc["why"] | "");
     } else if (!strcmp(t, "woack")) {
         workout_on_ack(doc["st"] | 0u);
+    } else if (!strcmp(t, "wopos")) {
+        workout_on_phone_pos(doc);
     } else if (!strcmp(t, "tz")) {
         clock_set_utc_offset(doc["o"] | 0);
     } else if (!strcmp(t, "wxh")) {
