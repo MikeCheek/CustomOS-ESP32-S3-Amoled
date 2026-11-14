@@ -182,7 +182,25 @@ class BleService {
         _connectionController.add(true);
       } catch (e) {
         print('[BLE] setup failed: $e');
-        await disconnect(); // not our watch, or it went away mid-setup
+        final dev = _device;
+        if (dev != null && autoReconnect && e is! StateError && e is! BlePairingException) {
+          // A hiccup while setting up a reconnection (a GATT error or a
+          // timeout, common right after the link comes up): drop this link
+          // but keep the phone reconnecting to the watch by itself.
+          try {
+            await dev.disconnect();
+          } catch (_) {}
+          await Future.delayed(const Duration(seconds: 2));
+          if (identical(_device, dev) && !dev.isAutoConnectEnabled) {
+            try {
+              await dev.connect(autoConnect: true, mtu: null);
+            } catch (e) {
+              print('[BLE] auto-reconnect re-arm failed: $e');
+            }
+          }
+        } else {
+          await disconnect(); // not our watch, or pairing needs the user
+        }
         _connectionController.add(false);
       } finally {
         _settingUp = false;
@@ -304,7 +322,7 @@ class BleService {
       try {
         await bat.read();
       } catch (_) {
-        throw Exception('Pairing needed: connect again, accept the request and type the code shown on the watch');
+        throw const BlePairingException('Pairing needed: connect again, accept the request and type the code shown on the watch');
       }
       return;
     }
@@ -316,6 +334,19 @@ class BleService {
       // "insufficient authentication/encryption": firmware 3.0, pair now
     }
     if (bonded) {
+      // Reconnecting with a bond: Android turns encryption on by itself from
+      // the stored keys, and a read sent before that finishes is refused.
+      // Give it a few seconds - removing a good bond here meant pairing
+      // again (or forgetting the watch) after every walk out of range.
+      for (var i = 0; i < 8; i++) {
+        await Future.delayed(const Duration(milliseconds: 750));
+        if (!device.isConnected) throw Exception('The watch disconnected');
+        try {
+          await bat.read();
+          return;
+        } catch (_) {}
+      }
+
       // The phone has a bond the watch no longer knows ("Unpair all phones"
       // on the watch, or a reflash): drop it, then pair again.
       try {
@@ -336,10 +367,10 @@ class BleService {
         print('[BLE] createBond: $e');
         await device.bondState
             .firstWhere((s) => s == BluetoothBondState.bonded || s == BluetoothBondState.none)
-            .timeout(const Duration(seconds: 120));
+            .timeout(const Duration(seconds: 120), onTimeout: () => BluetoothBondState.none);
       }
       if (await device.bondState.first != BluetoothBondState.bonded) {
-        throw Exception('Pairing was cancelled or the code was wrong');
+        throw const BlePairingException('Pairing was cancelled or the code was wrong');
       }
     } finally {
       pairingNeeded = false;
@@ -1032,4 +1063,13 @@ abstract class VirtualWatch {
   /// /Recordings/<name> from its SD card (what the app would download over
   /// Bluetooth), once a recording into it has finished.
   Future<Uint8List> readRecording(String name);
+}
+
+/// Setting up the link needs the user (pairing refused, cancelled or a wrong
+/// code): the app doesn't retry this by itself.
+class BlePairingException implements Exception {
+  const BlePairingException(this.message);
+  final String message;
+  @override
+  String toString() => 'Exception: $message';
 }

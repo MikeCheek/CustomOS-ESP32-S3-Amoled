@@ -937,6 +937,19 @@ void ble_update() {
             DEBUG_PRINTF("[ble] connection params -> %s\n", want == 2 ? "deep idle" : want ? "low power" : "fast");
         }
     } else {
+        // Nothing connected: the watch must be advertising, or the phone
+        // can't find it when it comes back in range. onDisconnect() starts
+        // it, but a start that failed there (or a stop below that raced a
+        // connection) left it silent until a restart.
+        static uint32_t s_adv_check_ms = 0;
+        if (now - s_adv_check_ms > 3000) {
+            s_adv_check_ms = now;
+            NimBLEAdvertising *adv = NimBLEDevice::getAdvertising();
+            if (!adv->isAdvertising()) {
+                bool ok = adv->start();
+                DEBUG_PRINTF("[ble] not advertising - restarted (%s)\n", ok ? "ok" : "failed");
+            }
+        }
         bool want_slow = s_low_power_req;
         if (want_slow != s_adv_slow) {
             NimBLEAdvertising *adv = NimBLEDevice::getAdvertising();
