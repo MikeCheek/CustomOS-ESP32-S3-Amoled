@@ -612,10 +612,21 @@ void ui_push(Screen *screen) {
     }
 
     if (s_tr != TR_NONE || s_drag != DRAG_IDLE) finish_transition();
+    if (s_top >= UI_MAX_STACK - 1) {
+        // Full: make room by dropping the oldest screen above the face (it
+        // was already closed - on_destroy - when something covered it, and
+        // can't be shown again). Refusing instead made every later push a
+        // no-op: PWR's lock and power-off, alarms and calls then did nothing.
+        // The top screen stays alive.
+        DEBUG_PRINTF("[ui] screen stack full - dropping \"%s\"\n",
+                     s_stack[1].screen && s_stack[1].screen->title ? s_stack[1].screen->title : "?");
+        for (int i = 1; i < s_top; i++) s_stack[i] = s_stack[i + 1];
+        s_stack[s_top].screen = nullptr;
+        s_top--;
+    }
     Screen *from = active_screen();
-    bool animate = s_top < UI_MAX_STACK - 1 && transitions_allowed(from, screen) && snapshot_last_frame();
+    bool animate = transitions_allowed(from, screen) && snapshot_last_frame();
 
-    if (s_top >= UI_MAX_STACK - 1) return;   // full: leave the top screen alive (callers retrying every loop must not destroy it)
     if (s_top >= 0 && s_stack[s_top].screen && s_stack[s_top].screen->on_destroy)
         s_stack[s_top].screen->on_destroy();
     if (s_top < UI_MAX_STACK - 1) {

@@ -782,6 +782,16 @@ void loop() {
 
     if (boot_evt != BTN_EVENT_NONE || pwr_evt != BTN_EVENT_NONE) {
         PROF(sleep_register_activity());
+        // Developer mode: every press the watch gets, on screen - a button
+        // that does nothing either never reaches here (the case, the PMU)
+        // or reaches here and its action failed
+        if (g_app_settings.developer_mode) {
+            static const char *const EV[] = {"", "short", "double", "hold"};   // ButtonEvent order
+            char t[40];
+            snprintf(t, sizeof(t), "%s%s%s%s%s", boot_evt ? "BOOT: " : "", boot_evt ? EV[boot_evt % 4] : "",
+                     boot_evt && pwr_evt ? "  " : "", pwr_evt ? "PWR: " : "", pwr_evt ? EV[pwr_evt % 4] : "");
+            ui_show_toast(t, 1500);
+        }
     }
 
     bool asleep;

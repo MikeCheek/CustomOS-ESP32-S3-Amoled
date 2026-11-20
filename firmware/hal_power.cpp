@@ -145,8 +145,8 @@ static bool s_pek_long_pending = false;
 void power_poll_pek_button() {
     if (!s_ok) return;
     uint32_t status = s_pmu.getIrqStatus();
-    if (s_pmu.isPekeyShortPressIrq()) s_pek_short_pending = true;
-    if (s_pmu.isPekeyLongPressIrq()) s_pek_long_pending = true;
+    if (s_pmu.isPekeyShortPressIrq()) { s_pek_short_pending = true; DEBUG_PRINTF("[power] PWR short press (PMU)\n"); }
+    if (s_pmu.isPekeyLongPressIrq()) { s_pek_long_pending = true; DEBUG_PRINTF("[power] PWR long press (PMU)\n"); }
     if (status != 0) s_pmu.clearIrqStatus();
 }
 
