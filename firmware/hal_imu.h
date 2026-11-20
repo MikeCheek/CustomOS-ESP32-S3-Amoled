@@ -40,6 +40,10 @@ void imu_get_calibrated_tilt(const ImuSample &sample, float &tilt_x, float &tilt
 // real pedometer algorithm if you want production-quality step counts.
 // Takes a pre-read sample to avoid double I2C transactions.
 void imu_step_counter_update(const ImuSample &sample);
+// Software steps from every sample (motion_update(), 62.5 Hz); only counts
+// when the hardware pedometer isn't running.
+void imu_step_feed(float ax, float ay, float az, uint32_t t_ms);   // t_ms: when the sample was taken
+bool imu_hw_pedometer();   // the chip counts steps itself
 uint32_t imu_get_step_count();
 void imu_step_counter_reset();
 // Reads the QMI8658's hardware pedometer (counts with the screen off too)

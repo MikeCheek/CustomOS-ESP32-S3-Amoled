@@ -26,7 +26,10 @@ static int s_day = -1;
 
 void motion_update() {
     bool track = g_app_settings.activity_track || s_open;
-    bool need = g_app_settings.fall_detect || track || g_app_settings.flick_back;
+    // Software steps (no hardware pedometer) need every sample too - all
+    // day for the rings, and a workout's own count.
+    bool sw_steps = !imu_hw_pedometer();
+    bool need = g_app_settings.fall_detect || track || g_app_settings.flick_back || sw_steps || workout_active();
     imu_fifo_enable(need);
     if (!need) return;
     static uint32_t last_ms = 0;
@@ -51,6 +54,7 @@ void motion_update() {
         float d = fabsf(sqrtf(x * x + y * y + z * z) - 1.0f);
         if (d > peak) peak = d;
         if (g_app_settings.fall_detect) fall_feed(x, y, z);
+        if (sw_steps) imu_step_feed(x, y, z, now - (uint32_t)(n - 1 - i) * 16);   // 62.5 Hz: 16 ms apart
         if (track && s_act.feed(x, y, z)) {
             s_secs[s_act.current()] += 5;
             fitness_feed(s_act.current(), s_act.cadence());   // the rings

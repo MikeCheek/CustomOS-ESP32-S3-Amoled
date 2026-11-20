@@ -26,6 +26,10 @@
 //  watch -> app  0x81 status                       begin result: 0 ok, 1 error,
 //                                                  2 too big, 3 battery low
 //                0x82 written(4 LE)                progress ack every 16 KB
+//                0x83 offset(4 LE)                 resend from offset: a packet went
+//                                                  missing, the ones after it were
+//                                                  dropped (after fw 3.4.0; repeated every
+//                                                  second until data at offset arrives)
 //                0x84 status                       end: 0 ok (restarting), else error
 //                                                  (10 = signature missing or wrong,
 //                                                  11 = older than installed, signing on)
@@ -48,6 +52,13 @@ static volatile bool s_end_req = false, s_abort_req = false;
 static volatile uint32_t s_rx_expected = 0;       // next offset the BLE side expects
 static volatile uint32_t s_last_rx_ms = 0;
 static volatile uint8_t s_rx_error = 0;           // set on the BLE task, reported by the loop
+// A packet lost on the way in (the Bluetooth host has 24 receive buffers by
+// default and drops a packet when they stay full - they do while flash
+// writes stall it): everything after it is dropped until the app resends
+// from s_rx_expected (0x83).
+static volatile bool s_gap = false;
+static volatile uint32_t s_gap_ms = 0;
+static uint32_t s_gap_sent_ms = 0;
 
 static uint32_t s_total = 0, s_written = 0, s_last_ack = 0;
 static uint32_t s_done_ms = 0;
@@ -156,7 +167,11 @@ void ota_on_ble_write(const uint8_t *d, int len) {
             if (s_state != OTA_RECEIVING || len < 5 || s_rx_error) return;
             uint32_t off = (uint32_t)d[1] | ((uint32_t)d[2] << 8) | ((uint32_t)d[3] << 16) | ((uint32_t)d[4] << 24);
             int n = len - 5;
-            if (off != s_rx_expected) { s_rx_error = 2; return; }       // gap / reorder
+            if (off != s_rx_expected) {                                  // gap: wait for the resend
+                if (!s_gap) { s_gap_ms = millis(); __sync_synchronize(); s_gap = true; }
+                return;
+            }
+            s_gap = false;
             if (s_head - s_tail + n > RING_SIZE) { s_rx_error = 3; return; } // app ignored flow control
             uint32_t h = s_head;
             for (int i = 0; i < n; ) {
@@ -212,6 +227,8 @@ static void handle_begin(uint32_t size) {
     s_head = s_tail = 0;
     s_rx_expected = 0;
     s_rx_error = 0;
+    s_gap = false;
+    s_gap_sent_ms = 0;
     s_end_req = s_abort_req = false;
     s_error[0] = 0;
     s_has_sig = false;
@@ -247,11 +264,23 @@ void ota_update() {
     if (s_rx_error) { fail(s_rx_error == 2 ? "Data out of order" : "Buffer overflow", 0x85, s_rx_error); return; }
     if (!ble_is_connected()) { fail("Phone disconnected", 0x85, 5); return; }
     if (millis() - s_last_rx_ms > 20000) { fail("Timed out", 0x85, 6); return; }
+    if (s_gap) {
+        // An app from before 0x83 never resends: give up as before.
+        if (millis() - s_gap_ms > 15000) { fail("Data out of order", 0x85, 2); return; }
+        if ((!s_gap_sent_ms || millis() - s_gap_sent_ms > 1000) && notify(0x83, s_rx_expected, 4))
+            s_gap_sent_ms = millis() | 1;
+    } else {
+        s_gap_sent_ms = 0;
+    }
 
     // Write what has arrived, in sector-sized pieces (a flash erase+write
     // takes a few tens of ms - a bounded amount per loop keeps the UI alive).
     uint8_t *chunk = s_ring + RING_SIZE;   // staging area after the ring
     for (int rounds = 0; rounds < 6; rounds++) {
+        // Each write erases a sector with the caches off, which stalls the
+        // Bluetooth host: a short pause between them lets it empty its
+        // receive buffers before they overflow (and drop a packet).
+        if (rounds) delay(3);
         uint32_t avail = s_head - s_tail;
         if (avail == 0 || (avail < WRITE_CHUNK && !s_end_req && s_written + avail < s_total)) break;
         uint32_t n = avail < WRITE_CHUNK ? avail : WRITE_CHUNK;
@@ -282,8 +311,15 @@ void ota_update() {
         s_last_ack = s_written;
     }
 
-    if (s_end_req && s_head == s_tail) {
+    if (s_end_req && !s_gap && s_head == s_tail) {
         s_end_req = false;
+        if (s_rx_expected != s_total) {
+            // The last packets went missing (no later one showed the gap):
+            // ask for them; the app sends 0x03 again after the resend.
+            s_gap_ms = millis();
+            s_gap = true;
+            return;
+        }
         if (s_written != s_total) { fail("Incomplete image", 0x84, 8); return; }
         uint8_t hash[32];
         mbedtls_sha256_finish(&s_sha, hash);

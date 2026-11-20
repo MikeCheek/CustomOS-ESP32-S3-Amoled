@@ -1,6 +1,8 @@
+// AGP 9 compiles the Kotlin sources itself (built-in Kotlin: no kotlin-android
+// plugin; src/main/kotlin is a default source folder, and Kotlin's JVM target
+// follows compileOptions).
 plugins {
-    id("com.android.application") version "8.11.1"
-    id("org.jetbrains.kotlin.android") version "2.2.20"
+    id("com.android.application") version "9.3.1"
 }
 
 android {
@@ -19,7 +21,6 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
-    kotlinOptions { jvmTarget = "17" }
 
     // The same key as the main app (build.yml's secrets): the main app's
     // signature permission lets only it ask the helper to press buttons.
@@ -42,5 +43,4 @@ android {
             isMinifyEnabled = false
         }
     }
-    sourceSets["main"].java.srcDirs("src/main/kotlin")
 }

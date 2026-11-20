@@ -28,6 +28,7 @@ import 'home_provider.dart';
 import 'sleep_provider.dart';
 import 'wallet_provider.dart';
 import '../services/camera_remote.dart';
+import '../services/workout_gps.dart';
 import 'look_provider.dart';
 import 'life_provider.dart';
 import 'usage_provider.dart';
@@ -307,6 +308,7 @@ class CompanionNotifier extends StateNotifier<CompanionState> {
   Future<void> _onConnection(bool connected) async {
     if (!mounted) return;
     if (!connected) {
+      WorkoutGps.instance.linkLost();
       state = state.copyWith(linkActive: false, findingPhone: false);
       _pushWidget();
       return;
@@ -659,6 +661,9 @@ class CompanionNotifier extends StateNotifier<CompanionState> {
       case 'todo':
         if (e['d'] == 1) await _onWatchTodo(e['k'] as String? ?? '');
         break;
+      case 'wogps':
+        await _onWorkoutGps(e);
+        break;
       case 'wo':
         await _ref.read(fitnessProvider.notifier).addWorkout(e);
         await _ble.sendLink({'t': 'woack', 'st': e['st']});
@@ -672,6 +677,23 @@ class CompanionNotifier extends StateNotifier<CompanionState> {
         }
         break;
     }
+  }
+
+  /// An outdoor workout on a watch without GPS: distance from the phone's.
+  Future<void> _onWorkoutGps(Map<String, dynamic> e) async {
+    final gps = WorkoutGps.instance;
+    final st = (e['st'] as num?)?.toInt() ?? 0;
+    if (e['on'] != 1) {
+      gps.stop();
+      return;
+    }
+    Future<void> send(Map<String, dynamic> m) => _ble.sendLink(m);
+    if (Platform.isIOS) return gps.refuse(st, 'Phone GPS: Android only for now', send);
+    if (!_settings.phoneGpsWorkouts) return gps.refuse(st, 'Phone GPS is off in the app', send);
+    if (!await Permission.locationWhenInUse.isGranted) {
+      return gps.refuse(st, 'Allow location for the app (Settings > Phone GPS)', send);
+    }
+    gps.start(st, send);
   }
 
   void _onWatchReport(Map<String, dynamic> e) {

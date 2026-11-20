@@ -9,6 +9,7 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.location.Location
+import android.location.LocationListener
 import android.location.LocationManager
 import android.media.AudioAttributes
 import android.media.AudioManager
@@ -46,6 +47,7 @@ import io.flutter.plugin.common.MethodChannel
  * EventChannel   com.amoledwatch.native/calendar       "changed" when the calendar changes
  * EventChannel   com.amoledwatch.native/widget         taps on the home-screen widget
  * EventChannel   com.amoledwatch.native/dnd            Do Not Disturb on/off changes
+ * EventChannel   com.amoledwatch.native/location       GPS fixes while listened to (workouts)
  */
 class PhoneBridge(private val app: Context, messenger: BinaryMessenger) {
 
@@ -332,6 +334,47 @@ class PhoneBridge(private val app: Context, messenger: BinaryMessenger) {
                 override fun onCancel(arguments: Any?) { widgetSink = null }
             })
 
+        // GPS fixes for a workout on a watch without GPS (WorkoutGps.dart):
+        // one a second from the GPS itself while someone listens. Runs in
+        // the background too when location is allowed "all the time" (the
+        // link's foreground service keeps the app running).
+        EventChannel(messenger, "com.amoledwatch.native/location").setStreamHandler(
+            object : EventChannel.StreamHandler {
+                override fun onListen(arguments: Any?, events: EventChannel.EventSink?) {
+                    stopFixes()
+                    if (events == null) return
+                    if (app.checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+                        events.error("permission", "Location not allowed", null)
+                        return
+                    }
+                    val lm = app.getSystemService(Context.LOCATION_SERVICE) as LocationManager
+                    if (!lm.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
+                        events.error("off", "Location is off on the phone", null)
+                        return
+                    }
+                    // every method spelled out: before Android 10 they have no defaults
+                    val l = object : LocationListener {
+                        override fun onLocationChanged(loc: Location) {
+                            events.success(mapOf(
+                                "lat" to loc.latitude, "lon" to loc.longitude,
+                                "acc" to (if (loc.hasAccuracy()) loc.accuracy.toDouble() else 999.0),
+                                "t" to loc.time))
+                        }
+                        @Deprecated("Deprecated in Java")
+                        override fun onStatusChanged(provider: String?, status: Int, extras: android.os.Bundle?) {}
+                        override fun onProviderEnabled(provider: String) {}
+                        override fun onProviderDisabled(provider: String) {}
+                    }
+                    try {
+                        lm.requestLocationUpdates(LocationManager.GPS_PROVIDER, 1000L, 0f, l, Looper.getMainLooper())
+                        fixListener = l
+                    } catch (e: SecurityException) {
+                        events.error("permission", "Location not allowed", null)
+                    }
+                }
+                override fun onCancel(arguments: Any?) { stopFixes() }
+            })
+
         EventChannel(messenger, "com.amoledwatch.native/dnd").setStreamHandler(
             object : EventChannel.StreamHandler {
                 override fun onListen(arguments: Any?, events: EventChannel.EventSink?) {
@@ -553,6 +596,15 @@ class PhoneBridge(private val app: Context, messenger: BinaryMessenger) {
     }
 
     // ---- location (for weather) ------------------------------------------------
+
+    private var fixListener: LocationListener? = null
+
+    private fun stopFixes() {
+        val l = fixListener ?: return
+        fixListener = null
+        val lm = app.getSystemService(Context.LOCATION_SERVICE) as LocationManager
+        try { lm.removeUpdates(l) } catch (_: Exception) {}
+    }
 
     private fun lastLocation(): Map<String, Double>? {
         val fine = app.checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED

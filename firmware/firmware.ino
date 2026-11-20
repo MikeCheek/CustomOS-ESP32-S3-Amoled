@@ -782,6 +782,16 @@ void loop() {
 
     if (boot_evt != BTN_EVENT_NONE || pwr_evt != BTN_EVENT_NONE) {
         PROF(sleep_register_activity());
+        // Developer mode: every press the watch gets, on screen - a button
+        // that does nothing either never reaches here (the case, the PMU)
+        // or reaches here and its action failed
+        if (g_app_settings.developer_mode) {
+            static const char *const EV[] = {"", "short", "double", "hold"};   // ButtonEvent order
+            char t[40];
+            snprintf(t, sizeof(t), "%s%s%s%s%s", boot_evt ? "BOOT: " : "", boot_evt ? EV[boot_evt % 4] : "",
+                     boot_evt && pwr_evt ? "  " : "", pwr_evt ? "PWR: " : "", pwr_evt ? EV[pwr_evt % 4] : "");
+            ui_show_toast(t, 1500);
+        }
     }
 
     bool asleep;
@@ -960,7 +970,7 @@ void loop() {
         // 250 ms: the touch controller's interrupt and BOOT wake the chip
         // at once anyway; this only paces the polling (raise to wake, the
         // PMU, the phone link) - fewer wake-ups in light sleep.
-        if (notes_download_active() || wifi_xfer_active()) delay(4);   // a transfer is running: keep it moving
+        if (notes_download_active() || wifi_xfer_active() || ota_active()) delay(4);   // a transfer is running: keep it moving
         else if (keep_awake || !power_light_sleep(250)) delay(keep_awake ? 150 : 250);
         return;
     }

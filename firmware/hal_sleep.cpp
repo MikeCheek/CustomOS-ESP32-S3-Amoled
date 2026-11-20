@@ -80,11 +80,20 @@ uint32_t sleep_ms_since_activity() {
     return millis() - s_last_activity_ms;
 }
 
+// Locked by hand (the PWR button): the arm that pressed it is still up and
+// moving, which raise to wake read as a raise and woke the screen again
+// within a second - the lock seemed to do nothing. Motion can't wake it
+// for a moment after.
+static const uint32_t LOCK_MOTION_GRACE_MS = 2500;
+static uint32_t s_forced_ms = 0;
+
 void sleep_force_sleep() {
     if (s_asleep) return;
 #if FEATURE_NVS
     nvs_save_steps(imu_get_step_count());
 #endif
+    s_moved_ms = 0;
+    s_forced_ms = millis() | 1;
     s_asleep = true;
     aod_sleep_display();
 }
@@ -139,7 +148,8 @@ bool sleep_update() {
         }
     }
 
-    if (g_app_settings.wake_on_motion && (now - s_last_motion_check_ms) >= MOTION_CHECK_PERIOD_MS) {
+    if (s_forced_ms && now - s_forced_ms >= LOCK_MOTION_GRACE_MS) s_forced_ms = 0;
+    if (g_app_settings.wake_on_motion && !s_forced_ms && (now - s_last_motion_check_ms) >= MOTION_CHECK_PERIOD_MS) {
         s_last_motion_check_ms = now;
         if (check_motion_now()) {
             s_moved_ms = 0;

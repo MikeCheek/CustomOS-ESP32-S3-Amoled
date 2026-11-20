@@ -182,7 +182,25 @@ class BleService {
         _connectionController.add(true);
       } catch (e) {
         print('[BLE] setup failed: $e');
-        await disconnect(); // not our watch, or it went away mid-setup
+        final dev = _device;
+        if (dev != null && autoReconnect && e is! StateError && e is! BlePairingException) {
+          // A hiccup while setting up a reconnection (a GATT error or a
+          // timeout, common right after the link comes up): drop this link
+          // but keep the phone reconnecting to the watch by itself.
+          try {
+            await dev.disconnect();
+          } catch (_) {}
+          await Future.delayed(const Duration(seconds: 2));
+          if (identical(_device, dev) && !dev.isAutoConnectEnabled) {
+            try {
+              await dev.connect(autoConnect: true, mtu: null);
+            } catch (e) {
+              print('[BLE] auto-reconnect re-arm failed: $e');
+            }
+          }
+        } else {
+          await disconnect(); // not our watch, or pairing needs the user
+        }
         _connectionController.add(false);
       } finally {
         _settingUp = false;
@@ -304,7 +322,7 @@ class BleService {
       try {
         await bat.read();
       } catch (_) {
-        throw Exception('Pairing needed: connect again, accept the request and type the code shown on the watch');
+        throw const BlePairingException('Pairing needed: connect again, accept the request and type the code shown on the watch');
       }
       return;
     }
@@ -316,6 +334,19 @@ class BleService {
       // "insufficient authentication/encryption": firmware 3.0, pair now
     }
     if (bonded) {
+      // Reconnecting with a bond: Android turns encryption on by itself from
+      // the stored keys, and a read sent before that finishes is refused.
+      // Give it a few seconds - removing a good bond here meant pairing
+      // again (or forgetting the watch) after every walk out of range.
+      for (var i = 0; i < 8; i++) {
+        await Future.delayed(const Duration(milliseconds: 750));
+        if (!device.isConnected) throw Exception('The watch disconnected');
+        try {
+          await bat.read();
+          return;
+        } catch (_) {}
+      }
+
       // The phone has a bond the watch no longer knows ("Unpair all phones"
       // on the watch, or a reflash): drop it, then pair again.
       try {
@@ -336,10 +367,10 @@ class BleService {
         print('[BLE] createBond: $e');
         await device.bondState
             .firstWhere((s) => s == BluetoothBondState.bonded || s == BluetoothBondState.none)
-            .timeout(const Duration(seconds: 120));
+            .timeout(const Duration(seconds: 120), onTimeout: () => BluetoothBondState.none);
       }
       if (await device.bondState.first != BluetoothBondState.bonded) {
-        throw Exception('Pairing was cancelled or the code was wrong');
+        throw const BlePairingException('Pairing was cancelled or the code was wrong');
       }
     } finally {
       pairingNeeded = false;
@@ -512,6 +543,10 @@ class BleService {
     int? beginStatus;
     int? endStatus;
     int? failCode;
+    // Firmware after 3.4.0: a packet the watch lost (its Bluetooth buffers
+    // overflow while it writes flash) - it drops the ones after it and asks
+    // for everything again from this offset.
+    int? resendFrom;
     final events = _otaController.stream.listen((v) {
       final op = v[0];
       if (op == 0x81 && v.length >= 2) beginStatus = v[1];
@@ -519,6 +554,7 @@ class BleService {
         acked = v[1] | (v[2] << 8) | (v[3] << 16) | (v[4] << 24);
         onProgress?.call(acked, total);
       }
+      if (op == 0x83 && v.length >= 5) resendFrom = v[1] | (v[2] << 8) | (v[3] << 16) | (v[4] << 24);
       if (op == 0x84 && v.length >= 2) endStatus = v[1];
       if (op == 0x85 && v.length >= 2) failCode = v[1];
     });
@@ -538,6 +574,8 @@ class BleService {
     final noResponse = c.properties.writeWithoutResponse;
     Future<void> write(List<int> p) => c.write(p, withoutResponse: noResponse);
 
+    // Shortest connection interval while the image goes over (Android).
+    await setTransferPriority(true);
     try {
       final begin = Uint8List(5);
       begin[0] = 0x01;
@@ -561,26 +599,42 @@ class BleService {
       const window = 32 * 1024;
       final chunk = (_maxWrite - 5).clamp(1, 495);
       var off = 0;
-      while (off < total) {
-        if (cancel?.call() == true) throw Exception('Cancelled');
-        if (off - acked >= window) {
-          await waitFor(() => off - acked < window, const Duration(seconds: 20), 'flash write');
-          continue;
+      var resends = 0;
+      bool resendAsked() {
+        final r = resendFrom;
+        if (r == null) return false;
+        resendFrom = null;
+        if (++resends > 200) throw Exception('Too many lost packets - move the phone closer and try again');
+        off = r.clamp(0, total);
+        return true;
+      }
+
+      while (true) {
+        while (off < total) {
+          if (cancel?.call() == true) throw Exception('Cancelled');
+          if (resendAsked()) continue;
+          if (off - acked >= window) {
+            await waitFor(() => off - acked < window || resendFrom != null, const Duration(seconds: 20), 'flash write');
+            continue;
+          }
+          if (failCode != null) throw Exception(_otaFailText(failCode!));
+          final n = (total - off) < chunk ? (total - off) : chunk;
+          final p = Uint8List(5 + n);
+          p[0] = 0x02;
+          p.buffer.asByteData().setUint32(1, off, Endian.little);
+          p.setRange(5, 5 + n, image, off);
+          await write(p);
+          off += n;
         }
-        if (failCode != null) throw Exception(_otaFailText(failCode!));
-        final n = (total - off) < chunk ? (total - off) : chunk;
-        final p = Uint8List(5 + n);
-        p[0] = 0x02;
-        p.buffer.asByteData().setUint32(1, off, Endian.little);
-        p.setRange(5, 5 + n, image, off);
-        await write(p);
-        off += n;
+        if (signature != null && signature.length == 64) {
+          await c.write([0x05, ...signature]);
+        }
+        await c.write([0x03]);
+        await waitFor(() => endStatus != null || resendFrom != null, const Duration(seconds: 60), 'verification');
+        // The last packets went missing: send them (and 0x03) again.
+        if (endStatus == null && resendAsked()) continue;
+        break;
       }
-      if (signature != null && signature.length == 64) {
-        await c.write([0x05, ...signature]);
-      }
-      await c.write([0x03]);
-      await waitFor(() => endStatus != null, const Duration(seconds: 60), 'verification');
       if (endStatus == 10 || endStatus == 11) throw Exception(_otaFailText(endStatus!));
       if (endStatus != 0) throw Exception('The watch rejected the image (not a valid firmware)');
       onProgress?.call(total, total);
@@ -595,6 +649,7 @@ class BleService {
       rethrow;
     } finally {
       await events.cancel();
+      await setTransferPriority(false);
     }
   }
 
@@ -1008,4 +1063,13 @@ abstract class VirtualWatch {
   /// /Recordings/<name> from its SD card (what the app would download over
   /// Bluetooth), once a recording into it has finished.
   Future<Uint8List> readRecording(String name);
+}
+
+/// Setting up the link needs the user (pairing refused, cancelled or a wrong
+/// code): the app doesn't retry this by itself.
+class BlePairingException implements Exception {
+  const BlePairingException(this.message);
+  final String message;
+  @override
+  String toString() => 'Exception: $message';
 }
